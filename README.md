@@ -81,6 +81,8 @@ Telegram Bot API (sendMessage)
    - `TELEGRAM_CHAT_ID`
    - `MAILBOXES`（JSON 数组，格式见下文）
    - `ADMIN_TOKEN`
+
+   > 务必把所有占位值替换成真实值，尤其是 `MAILBOXES` 里的邮箱和应用密码。
 4. 点击 **Deploy**。Cloudflare 会自动创建 KV namespace、更新绑定并部署 Worker。
 5. 打开 `https://<你的-worker>.workers.dev/health`，确认 `configured: true`。
 6. 可选：在 Cloudflare Dashboard → Worker → **Settings → Variables and Secrets** 中添加 `TELEGRAM_JUNK_CHAT_ID`，用于垃圾邮件分流。

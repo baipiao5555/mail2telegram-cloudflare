@@ -2,6 +2,7 @@ import { describeConfigError, parseConfig, type Env } from './env';
 import { pollAll } from './poll';
 import { StateStore } from './state';
 import { makeSenderOptions, sendTestMessage, telegramErrorForLog } from './telegram';
+import { renderDashboardHtml } from './ui';
 import { errorMessage, timingSafeEqualString } from './util';
 
 function json(body: unknown, status = 200): Response {
@@ -10,6 +11,30 @@ function json(body: unknown, status = 200): Response {
     headers: {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
+    },
+  });
+}
+
+function htmlResponse(html: string, nonce: string): Response {
+  return new Response(html, {
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+      'content-security-policy': [
+        "default-src 'none'",
+        `script-src 'nonce-${nonce}'`,
+        `style-src 'nonce-${nonce}'`,
+        "img-src 'self' data:",
+        "connect-src 'self'",
+        "font-src 'self'",
+        "base-uri 'none'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+      ].join('; '),
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'referrer-policy': 'no-referrer',
+      'permissions-policy': 'camera=(), microphone=(), geolocation=()',
     },
   });
 }
@@ -156,20 +181,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     });
   }
 
-  if (url.pathname === '/' || url.pathname === '') {
-    return new Response(
-      [
-        'Mail2Telegram Cloudflare Worker',
-        '',
-        'GET  /health',
-        'GET  /status          (Authorization: Bearer ADMIN_TOKEN)',
-        'POST /run             (Authorization: Bearer ADMIN_TOKEN)',
-        'POST /telegram/test   (Authorization: Bearer ADMIN_TOKEN)',
-        '',
-        'Mail is polled by the Cron Trigger configured in wrangler.toml.',
-      ].join('\n'),
-      { headers: { 'content-type': 'text/plain; charset=utf-8' } },
-    );
+  if (url.pathname === '/' || url.pathname === '/dashboard') {
+    if (method !== 'GET' && method !== 'HEAD') {
+      return json({ error: 'method not allowed' }, 405);
+    }
+    const nonce = crypto.randomUUID();
+    return htmlResponse(method === 'HEAD' ? '' : renderDashboardHtml(nonce), nonce);
   }
 
   if (url.pathname === '/status') {

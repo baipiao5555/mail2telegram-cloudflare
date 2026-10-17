@@ -25,7 +25,10 @@
 - 邮件过大时只发送提醒，不下载正文
 - 用 Message-ID 去重，尽量避免重复通知
 - Telegram 消息自动分片、转义、429/5xx 重试、HTML 解析失败时退化为纯文本
+- 内置可视化管理控制台，可查看邮箱/文件夹状态并手动触发运行
 - 提供 `/health`、`/status`、`/run`、`/telegram/test` 管理端点
+
+![控制台](docs/dashboard.png)
 
 ## 与 Python 版的区别
 
@@ -85,7 +88,8 @@ Telegram Bot API (sendMessage)
    > 务必把所有占位值替换成真实值，尤其是 `MAILBOXES` 里的邮箱和应用密码。
 4. 点击 **Deploy**。Cloudflare 会自动创建 KV namespace、更新绑定并部署 Worker。
 5. 打开 `https://<你的-worker>.workers.dev/health`，确认 `configured: true`。
-6. 可选：在 Cloudflare Dashboard → Worker → **Settings → Variables and Secrets** 中添加 `TELEGRAM_JUNK_CHAT_ID`，用于垃圾邮件分流。
+6. 打开 Worker 根地址，输入 `ADMIN_TOKEN` 进入控制台，查看状态或手动运行。
+7. 可选：在 Cloudflare Dashboard → Worker → **Settings → Variables and Secrets** 中添加 `TELEGRAM_JUNK_CHAT_ID`，用于垃圾邮件分流。
 
 说明：
 
@@ -211,7 +215,7 @@ npm run deploy
 curl https://<你的-worker>.workers.dev/health
 ```
 
-返回 `configured: true` 表示基础配置完整。
+返回 `configured: true` 表示基础配置完整。浏览器打开 Worker 根地址并输入 `ADMIN_TOKEN`，可以在控制台里查看状态和执行操作。
 
 手动触发一次并查看结果：
 
@@ -272,7 +276,7 @@ crons = ["*/5 * * * *"]
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
 | GET | `/health` | 无 | 健康检查，不泄露邮箱和密钥 |
-| GET | `/` | 无 | 端点列表 |
+| GET | `/`、`/dashboard` | 页面公开，数据需 Bearer | 可视化管理控制台 |
 | GET | `/status` | Bearer | 查看每个邮箱最近运行状态、游标和错误 |
 | POST | `/run` | Bearer | 立即轮询；可加 `?mailbox=you@gmail.com` 只跑一个账号 |
 | POST | `/telegram/test` | Bearer | 发送测试消息 |
@@ -282,6 +286,19 @@ crons = ["*/5 * * * *"]
 ```text
 Authorization: Bearer <ADMIN_TOKEN>
 ```
+
+## 控制台
+
+浏览器打开 Worker 根地址，输入部署时设置的 `ADMIN_TOKEN` 即可进入控制台：
+
+- 查看每个邮箱、每个文件夹的 UID、UIDVALIDITY 和最近转发时间
+- 查看最近运行时间、配置和错误信息
+- 一键执行「刷新状态」「立即运行」「发送测试消息」
+- Token 只保存在当前标签页的 `sessionStorage`，关闭页面后自动清除
+- 未登录时页面不会加载任何邮箱数据；所有数据接口仍然要求 Bearer token
+- 页面带 CSP、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer` 等安全响应头
+
+![控制台](docs/dashboard.png)
 
 ## 行为说明
 

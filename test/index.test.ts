@@ -31,6 +31,40 @@ afterEach(() => {
 });
 
 describe('HTTP endpoints', () => {
+  it('serves the dashboard UI with security headers and no secrets', async () => {
+    const response = await worker.fetch(request('/'), env(), ctx);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(response.headers.get('x-frame-options')).toBe('DENY');
+    expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+
+    const csp = response.headers.get('content-security-policy') ?? '';
+    expect(csp).toContain("script-src 'nonce-");
+    expect(csp).toContain("style-src 'nonce-");
+    expect(csp).toContain("frame-ancestors 'none'");
+
+    const html = await response.text();
+    expect(html).toContain('Mail2Telegram');
+    expect(html).toContain('id="loginPanel"');
+    expect(html).toContain('ADMIN_TOKEN');
+    expect(html).not.toContain('user@gmail.com');
+    expect(html).not.toContain('app-password');
+    expect(html).not.toContain('123456:ABC');
+  });
+
+  it('serves the dashboard at /dashboard and rejects other methods', async () => {
+    const dashboard = await worker.fetch(request('/dashboard'), env(), ctx);
+    expect(dashboard.status).toBe(200);
+    expect(await dashboard.text()).toContain('id="dashboard"');
+
+    const head = await worker.fetch(request('/', { method: 'HEAD' }), env(), ctx);
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe('');
+
+    const post = await worker.fetch(request('/', { method: 'POST' }), env(), ctx);
+    expect(post.status).toBe(405);
+  });
+
   it('serves public health information without secrets', async () => {
     const response = await worker.fetch(request('/health'), env(), ctx);
     expect(response.status).toBe(200);

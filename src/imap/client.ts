@@ -43,6 +43,7 @@ export class ImapClient {
   private tagCounter = 0;
   private closed = false;
   private closePromise: Promise<void> | null = null;
+  private idleTag: string | null = null;
 
   readonly capabilities = new Set<string>();
   uidValidity = 0;
@@ -276,9 +277,97 @@ export class ImapClient {
     return response.literals[0] ?? new Uint8Array(0);
   }
 
+  async startIdle(): Promise<void> {
+    this.assertAlive();
+    if (!this.capabilities.has('IDLE')) {
+      throw new Error('IMAP server does not advertise IDLE');
+    }
+    if (this.idleTag) {
+      throw new Error('IDLE is already active');
+    }
+    const tag = this.nextTag();
+    await this.writeLine(`${tag} IDLE`);
+    const continuation = await this.readLine();
+    if (!continuation.startsWith('+')) {
+      throw new ImapProtocolError(`IDLE was rejected: ${continuation}`);
+    }
+    this.idleTag = tag;
+  }
+
+  private async finishIdle(tag: string, pendingLine?: Promise<string>): Promise<void> {
+    await this.writeLine('DONE');
+    let line = pendingLine ? await pendingLine : await this.readLine();
+    while (!line.startsWith(`${tag} `)) {
+      if (line.startsWith('* BYE')) {
+        this.idleTag = null;
+        throw new ImapProtocolError(`server closed during IDLE: ${line}`);
+      }
+      line = await this.readLine();
+    }
+    this.idleTag = null;
+  }
+
+  /**
+   * Waits for an EXISTS/RECENT notification. When it arrives, IDLE is ended and
+   * "mail" is returned. On timeout, DONE is sent and "timeout" is returned.
+   */
+  async waitForIdleEvent(timeoutMs: number): Promise<'mail' | 'timeout'> {
+    this.assertAlive();
+    if (!this.idleTag || !this.reader) {
+      throw new Error('IDLE is not active');
+    }
+    const tag = this.idleTag;
+    const deadline = Date.now() + Math.max(1, timeoutMs);
+
+    while (true) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        await this.finishIdle(tag);
+        return 'timeout';
+      }
+
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const linePromise = this.reader.readLine();
+      const timeout = new Promise<'timeout'>((resolve) => {
+        timer = setTimeout(() => resolve('timeout'), remaining);
+      });
+      const result = await Promise.race([linePromise, timeout]);
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+
+      if (result === 'timeout') {
+        await this.finishIdle(tag, linePromise);
+        return 'timeout';
+      }
+
+      const line = result;
+      if (line.startsWith(`${tag} `)) {
+        this.idleTag = null;
+        throw new ImapProtocolError(`IDLE ended unexpectedly: ${line}`);
+      }
+      if (line.startsWith('* BYE')) {
+        this.idleTag = null;
+        throw new ImapProtocolError(`server closed during IDLE: ${line}`);
+      }
+      if (/^\*\s+\d+\s+(EXISTS|RECENT)$/i.test(line)) {
+        await this.finishIdle(tag);
+        return 'mail';
+      }
+      // Ignore untagged keep-alive, FLAGS, EXPUNGE, and FETCH lines.
+    }
+  }
+
   async logout(): Promise<void> {
     if (this.closed) {
       return;
+    }
+    if (this.idleTag) {
+      try {
+        await this.finishIdle(this.idleTag);
+      } catch {
+        // Closing the socket below is sufficient.
+      }
     }
     try {
       await this.command('LOGOUT');
@@ -294,6 +383,7 @@ export class ImapClient {
       return this.closePromise;
     }
     this.closed = true;
+    this.idleTag = null;
     this.closePromise = (async () => {
       try {
         await this.reader?.cancel();

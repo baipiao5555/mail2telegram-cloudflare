@@ -18,3 +18,7 @@ MAILBOXES=[{"email":"you@gmail.com","password":"app-password","host":"imap.gmail
 # WEBDAV_USERNAME=
 # WEBDAV_PASSWORD=
 # WEBDAV_PATH=SyncClipboard.json
+
+# Optional: IMAP listener
+# LISTEN_MODE=poll
+# IDLE_WINDOW_SECONDS=40

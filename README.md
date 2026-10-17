@@ -2,7 +2,7 @@
 
 把 [Heavrnl/mail2telegram](https://github.com/Heavrnl/mail2telegram) 从「Python + IMAP IDLE 常驻进程」改造成可以在 **Cloudflare Workers** 上部署的版本：
 
-- 用 **Cron Trigger** 定时轮询 IMAP（最小间隔 1 分钟）
+- 用 **Cron Trigger** 调度；支持 IDLE 实时窗口监听或传统轮询
 - 用 **KV** 保存每个邮箱、每个文件夹的 UID 游标、登录通知状态、去重记录和运行状态
 - 用 **Telegram Bot API** 转发邮件，保留原项目的 HTML 消息格式
 - 不需要服务器、Docker，也不需要长期在线的进程
@@ -16,6 +16,7 @@
 ## 功能
 
 - 同时监控多个邮箱账号
+- IMAP IDLE 实时监听：在每次 Cron 调用内保持连接，新邮件到达立即转发（可配置窗口）
 - 自动监控 `INBOX`，并自动发现 `Junk` / `Spam` / `垃圾邮件` 文件夹
 - 垃圾邮件可以转发到单独的 Telegram chat
 - HTML 邮件渲染为 Telegram 富文本（加粗、链接、列表、代码块、引用），自动清理脚本和样式
@@ -27,7 +28,7 @@
 - 用 Message-ID 去重，尽量避免重复通知
 - Telegram 消息自动分片、转义、429/5xx 重试、HTML 解析失败时退化为纯文本
 - 内置可视化管理控制台，可查看邮箱/文件夹状态并手动触发运行
-- 完整网页设置：邮箱、Telegram、语言/时区/同步策略/大小限制都可以在控制台修改，配置加密存入 KV
+- 完整网页设置：邮箱、Telegram、监听模式、语言/时区/同步策略/大小限制都可以在控制台修改，配置加密存入 KV
 - 提供 `/health`、`/status`、`/run`、`/telegram/test` 管理端点
 
 ![控制台](docs/dashboard.png)
@@ -36,14 +37,14 @@
 
 | Python 版 | 本项目 |
 | --- | --- |
-| 常驻进程 + IMAP IDLE，实时推送 | Cron 定时轮询，最小 1 分钟延迟 |
+| 常驻进程 + IMAP IDLE，实时推送 | Cron 调度 + IDLE 窗口，窗口内实时；窗口之间由下一次 Cron 补齐 |
 | `config.py` | Wrangler secrets / vars |
 | 本地日志文件 | Workers Logs / `wrangler tail` |
 | 断线重连、线程模型 | 每次运行重新连接，失败后下次 Cron 重试 |
-| 验证码提取扩展（EVC） | 已内置：正则提取 + WebDAV/SyncClipboard 推送 |
+| 验证码提取扩展（EVC） | 已内置：多语言正则提取 + WebDAV/SyncClipboard 推送 |
 | 附件 | 只通知正文，不转发附件 |
 
-Cloudflare Workers 无法运行常驻守护进程，因此不能保持 IMAP IDLE 连接。轮询是 Workers 上最稳定、成本最低的实现方式。
+Cloudflare Workers 无法无限期保持一条 IMAP 连接：单次 Cron 调用最多约 15 分钟。因此 IDLE 模式采用「每次 Cron 保持一段 IDLE 连接」的方式，窗口内新邮件即时推送，窗口之间由下一次 Cron 补齐。默认窗口 40 秒，适合每分钟 Cron；如果改成每 5 分钟或 15 分钟 Cron，可以把窗口调到 240–780 秒，减少重连。
 
 ## 架构
 
@@ -279,6 +280,8 @@ crons = ["*/5 * * * *"]
 | `LOGIN_NOTIFY` | `true` | 每个邮箱首次登录成功时发送一次通知 |
 | `DEDUPE` | `true` | 按 Message-ID 去重，保留 7 天 |
 | `DRY_RUN` | `false` | 只记录日志、不调用 Telegram；**仍会推进游标** |
+| `LISTEN_MODE` | `poll` | `poll` 轮询或 `idle` IDLE 窗口监听 |
+| `IDLE_WINDOW_SECONDS` | `40` | IDLE 窗口秒数（10–780），必须小于 Cron 间隔 |
 | `ENABLE_EVC` | `false` | 可选：启用验证码提取；网页设置里也可以开 |
 | `WEBDAV_URL` | 空 | 可选：r2-webdav 根地址（公网 http/https） |
 | `WEBDAV_USERNAME` | 空 | 可选：WebDAV 用户名 |
@@ -349,6 +352,24 @@ Authorization: Bearer <ADMIN_TOKEN>
 - `INITIAL_SYNC=skip`（默认）：记录每个文件夹当前最大 UID，不转发已有邮件。
 - `INITIAL_SYNC=latest`：转发每个文件夹最新的一封，然后记录游标。
 
+### IDLE 监听模式
+
+把 `LISTEN_MODE` 设为 `idle`（或在控制台「设置 → 监听模式」选择 IDLE）后：
+
+1. 每次 Cron 调用会连接每个邮箱/文件夹，先处理一次新邮件
+2. 然后进入 IMAP `IDLE`，服务器推送 `EXISTS` 时立即抓取并转发
+3. 到达 `IDLE_WINDOW_SECONDS` 后发送 `DONE`，关闭连接；下一次 Cron 再继续
+
+窗口必须小于 Cron 间隔：
+
+| Cron | 建议窗口 |
+| --- | --- |
+| `* * * * *`（每分钟） | 30–40 秒 |
+| `*/5 * * * *`（每 5 分钟） | 240–270 秒 |
+| `*/15 * * * *`（每 15 分钟） | 720–780 秒 |
+
+如果服务器不广告 `IDLE`，会退化为窗口内每 20 秒轮询一次。用户较多/文件夹较多时会同时占用多个 TCP 连接，建议控制账号数量。
+
 ### UIDVALIDITY 变化
 
 IMAP 服务器重建邮箱时会改变 `UIDVALIDITY`。检测到变化后，本项目会重新建立基线，避免把旧邮件当成新邮件重复发送。
@@ -390,7 +411,17 @@ HTML 邮件会转换成 Telegram 支持的富文本：
 - **用户名 / 密码**：r2-webdav 的 `USERNAME` / `PASSWORD`
 - **文件路径**：默认 `SyncClipboard.json`
 
-提取逻辑：在邮件主题和正文中查找“验证码 / 校验码 / verification code / OTP / PIN”等关键词附近的 4–8 位数字或字母数字组合（至少包含一个数字），然后 PUT 到：
+提取逻辑：在邮件主题和正文中查找多语言关键词附近的 4–8 位数字或字母数字组合（至少包含一个数字），支持：
+
+- 简体中文：验证码、校验码、动态码、确认码、一次性密码、一次性令牌、安全码、登录码、验证 ID
+- 繁体中文：驗證碼、校驗碼、動態碼、確認碼、一次性密碼、一次性令牌、安全碼、登入碼、驗證 ID
+- 英文：verification code、verify code、confirmation code、security code、one-time code/password/passcode/token、OTP、TOTP、PIN、code
+- 日文：認証コード、確認コード、検証コード、ワンタイムパスワード/コード、セキュリティコード、パスコード、暗証番号
+- 俄文：код подтверждения、проверочный код、одноразовый код/пароль、код безопасности、пин-код
+- 韩文：인증 코드、확인 코드、일회용 비밀번호/코드
+- 德/法/西/葡：bestätigungscode、code de vérification、código de verificación、código de verificação
+
+匹配到后 PUT 到：
 
 ```text
 <WebDAV URL>/<文件路径>
@@ -459,11 +490,11 @@ npm run deploy -- --dry-run
 
 测试包括：
 
-- IMAP 响应/literal 解析
+- IMAP 响应/literal 解析、IDLE 进入/退出与超时
 - 真实 IMAP 客户端流程（对本地假 IMAP 服务器）
 - 首次基线、增量拉取、UIDVALIDITY 重置、垃圾邮件分流、每轮上限、大邮件提醒、去重
 - 邮件解码、HTML → Telegram 富文本渲染与安全过滤
-- 验证码提取（数字/字母数字、空格/连字符分隔）
+- 多语言验证码提取（中日英俄韩德法西葡、简繁中文）
 - WebDAV 推送：URL/路径、Basic Auth、SyncClipboard JSON、SHA-256、重定向和私网拒绝
 - Telegram 分片、429 重试、HTML 退化
 - 配置校验、私网地址拒绝、HTTP 鉴权、加密设置存储

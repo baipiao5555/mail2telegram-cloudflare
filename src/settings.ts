@@ -41,6 +41,8 @@ export interface MaskedSettings {
     loginNotify: boolean;
     dedupe: boolean;
     dryRun: boolean;
+    listenMode: string;
+    idleWindowSeconds: number;
   };
   verification: {
     enabled: boolean;
@@ -249,6 +251,8 @@ export function maskSettings(
       loginNotify: settings.loginNotify,
       dedupe: settings.dedupe,
       dryRun: settings.dryRun,
+      listenMode: settings.listenMode ?? 'poll',
+      idleWindowSeconds: settings.idleWindowSeconds ?? 40,
     },
     verification: {
       enabled: Boolean(settings.verification?.enabled),
@@ -430,6 +434,8 @@ export function mergeSubmittedSettings(
     | 'loginNotify'
     | 'dedupe'
     | 'dryRun'
+    | 'listenMode'
+    | 'idleWindowSeconds'
   >;
   const nextGeneral: GeneralSettings = {
     language: existing.language,
@@ -441,6 +447,8 @@ export function mergeSubmittedSettings(
     loginNotify: existing.loginNotify,
     dedupe: existing.dedupe,
     dryRun: existing.dryRun,
+    listenMode: existing.listenMode ?? 'poll',
+    idleWindowSeconds: existing.idleWindowSeconds ?? 40,
   };
   if (general) {
     if (general.language !== undefined) {
@@ -471,6 +479,17 @@ export function mergeSubmittedSettings(
       }
       nextGeneral.initialSync = general.initialSync;
     }
+    if (general.listenMode !== undefined) {
+      if (general.listenMode !== 'poll' && general.listenMode !== 'idle') {
+        throw new Error('general.listenMode must be "poll" or "idle"');
+      }
+      nextGeneral.listenMode = general.listenMode;
+    }
+    nextGeneral.idleWindowSeconds = readOptionalNumber(
+      general,
+      'idleWindowSeconds',
+      existing.idleWindowSeconds ?? 40,
+    );
     nextGeneral.loginNotify = readOptionalBoolean(
       general,
       'loginNotify',

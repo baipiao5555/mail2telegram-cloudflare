@@ -47,6 +47,8 @@ function makeConfig(port: number, overrides: Partial<AppConfig> = {}): AppConfig
     loginNotify: false,
     dedupe: true,
     dryRun: false,
+    listenMode: 'poll',
+    idleWindowSeconds: 40,
     verification: {
       enabled: false,
       webdavUrl: '',

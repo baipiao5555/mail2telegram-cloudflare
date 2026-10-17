@@ -16,6 +16,8 @@ export interface Env {
   WEBDAV_USERNAME?: string;
   WEBDAV_PASSWORD?: string;
   WEBDAV_PATH?: string;
+  LISTEN_MODE?: string;
+  IDLE_WINDOW_SECONDS?: string;
   LANGUAGE?: string;
   TIMEZONE?: string;
   MAX_EMAIL_CHARS?: string;
@@ -29,6 +31,7 @@ export interface Env {
 
 export type Language = 'Chinese' | 'English';
 export type InitialSync = 'skip' | 'latest';
+export type ListenMode = 'poll' | 'idle';
 
 export interface VerificationSettings {
   enabled: boolean;
@@ -70,6 +73,8 @@ export interface StoredSettings {
   loginNotify: boolean;
   dedupe: boolean;
   dryRun: boolean;
+  listenMode?: ListenMode;
+  idleWindowSeconds?: number;
   mailboxes: StoredMailbox[];
   verification?: VerificationSettings;
 }
@@ -88,6 +93,8 @@ export interface AppConfig {
   loginNotify: boolean;
   dedupe: boolean;
   dryRun: boolean;
+  listenMode: ListenMode;
+  idleWindowSeconds: number;
   mailboxes: Mailbox[];
   verification: VerificationSettings;
 }
@@ -407,6 +414,19 @@ export function buildConfigFromStoredSettings(
           throw new Error('INITIAL_SYNC must be "skip" or "latest"');
         })();
 
+  const listenMode =
+    settings.listenMode === 'idle' || settings.listenMode === 'poll' || settings.listenMode === undefined
+      ? (settings.listenMode ?? 'poll')
+      : (() => {
+          throw new Error('LISTEN_MODE must be "poll" or "idle"');
+        })();
+  const idleWindowSeconds = requireNumber(
+    settings.idleWindowSeconds ?? 40,
+    'IDLE_WINDOW_SECONDS',
+    10,
+    780,
+  );
+
   const mailboxes = settings.mailboxes.map((mailbox, index) => {
     if (typeof mailbox !== 'object' || mailbox === null || Array.isArray(mailbox)) {
       throw new Error(`mailboxes[${index}] must be an object`);
@@ -442,6 +462,8 @@ export function buildConfigFromStoredSettings(
     loginNotify: requireBoolean(settings.loginNotify, 'LOGIN_NOTIFY'),
     dedupe: requireBoolean(settings.dedupe, 'DEDUPE'),
     dryRun,
+    listenMode,
+    idleWindowSeconds,
     mailboxes,
     verification: normalizeVerificationSettings(settings.verification),
   };
@@ -461,6 +483,8 @@ export function defaultStoredSettings(): StoredSettings {
     loginNotify: true,
     dedupe: true,
     dryRun: false,
+    listenMode: 'poll',
+    idleWindowSeconds: 40,
     mailboxes: [],
     verification: defaultVerificationSettings(),
   };
@@ -500,6 +524,8 @@ export function settingsFromEnv(env: Env): StoredSettings {
     loginNotify: parseBoolEnv(env.LOGIN_NOTIFY, true),
     dedupe: parseBoolEnv(env.DEDUPE, true),
     dryRun: parseBoolEnv(env.DRY_RUN, false),
+    listenMode: (env.LISTEN_MODE?.trim().toLowerCase() === 'idle' ? 'idle' : 'poll') as ListenMode,
+    idleWindowSeconds: parseIntEnv(env.IDLE_WINDOW_SECONDS, 40),
     mailboxes: parseMailboxes(env.MAILBOXES).map(storedMailboxFromMailbox),
     verification: {
       enabled: parseBoolEnv(env.ENABLE_EVC ?? env.ENABLE_VERIFICATION_CODE, false),

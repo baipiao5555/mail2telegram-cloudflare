@@ -88,6 +88,11 @@ function languageStrings(language: AppConfig['language']) {
   };
 }
 
+export function buildLoginMessage(config: AppConfig, mailbox: Mailbox): string {
+  const strings = languageStrings(config.language);
+  return `<b>${escapeHtml(strings.login(mailbox.email))}</b>`;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) {
     return `${(bytes / 1024).toFixed(1)} KB`;
@@ -241,7 +246,7 @@ async function processMessage(
   }
 }
 
-async function pollFolder(
+export async function pollFolder(
   client: ImapClient,
   mailbox: Mailbox,
   folder: FolderInfo,
@@ -302,7 +307,7 @@ async function pollFolder(
   return summary;
 }
 
-function resolveFolders(mailbox: Mailbox, available: FolderInfo[]): FolderInfo[] {
+export function resolveFolders(mailbox: Mailbox, available: FolderInfo[]): FolderInfo[] {
   const selectable = available.filter(isSelectableFolder);
   const findByCaseInsensitiveName = (name: string): FolderInfo | undefined =>
     selectable.find((folder) => folder.name.toLowerCase() === name.toLowerCase());
@@ -364,8 +369,7 @@ async function pollMailbox(
 
     if (config.loginNotify && !(await store.isLoginNotified(mailbox.id))) {
       try {
-        const strings = languageStrings(config.language);
-        await sendTelegramText(sender, config.chatId, `<b>${escapeHtml(strings.login(mailbox.email))}</b>`);
+        await sendTelegramText(sender, config.chatId, buildLoginMessage(config, mailbox));
         await store.markLoginNotified(mailbox.id);
         dirty = true;
       } catch (error) {

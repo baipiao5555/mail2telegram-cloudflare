@@ -40,6 +40,8 @@ function makeSettings(overrides: Partial<StoredSettings> = {}): StoredSettings {
     loginNotify: true,
     dedupe: true,
     dryRun: false,
+    listenMode: 'poll',
+    idleWindowSeconds: 40,
     mailboxes: [
       {
         email: 'user@gmail.com',

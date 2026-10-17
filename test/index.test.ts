@@ -25,6 +25,8 @@ function settingsPayload() {
       loginNotify: true,
       dedupe: true,
       dryRun: false,
+      listenMode: 'poll',
+      idleWindowSeconds: 40,
     },
     mailboxes: [
       {

@@ -90,6 +90,32 @@ describe('ImapClient', () => {
     }
   });
 
+  it('enters IDLE and terminates it cleanly on timeout', async () => {
+    server = makeServer();
+    const port = await server.start();
+    const client = new ImapClient({
+      host: '127.0.0.1',
+      port,
+      allowPrivateRemote: true,
+      timeoutMs: 5000,
+    });
+
+    try {
+      await client.connect();
+      await client.login('test@example.com', 'secret');
+      await client.select('INBOX');
+      expect(client.capabilities.has('IDLE')).toBe(true);
+
+      await client.startIdle();
+      await expect(client.waitForIdleEvent(80)).resolves.toBe('timeout');
+
+      // The connection must remain usable after DONE.
+      expect(await client.uidSearchAll()).toEqual([1]);
+    } finally {
+      await client.logout();
+    }
+  });
+
   it('rejects a wrong password', async () => {
     server = makeServer();
     const port = await server.start();

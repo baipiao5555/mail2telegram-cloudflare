@@ -88,12 +88,13 @@ export class FakeImapServer {
       // Ignore client disconnects.
     });
 
-    const capability = this.advertisePlain ? 'IMAP4rev1 AUTH=PLAIN' : 'IMAP4rev1';
+    const capability = this.advertisePlain ? 'IMAP4rev1 IDLE AUTH=PLAIN' : 'IMAP4rev1 IDLE';
     socket.write(`* OK [CAPABILITY ${capability}] fake IMAP ready\r\n`);
 
     let buffer = '';
     let authenticated = false;
     let awaitingAuthTag: string | null = null;
+    let idleTag: string | null = null;
     let currentFolder: FakeFolder | null = null;
 
     const write = (text: string | Buffer): void => {
@@ -247,6 +248,16 @@ export class FakeImapServer {
         return;
       }
 
+      if (upper === 'IDLE') {
+        if (!currentFolder) {
+          bad(tag, 'No mailbox selected');
+          return;
+        }
+        idleTag = tag;
+        write('+ idling\r\n');
+        return;
+      }
+
       if (upper === 'LIST "" "*"') {
         sendFolderList(tag);
         return;
@@ -312,6 +323,12 @@ export class FakeImapServer {
         }
         const line = buffer.slice(0, index);
         buffer = buffer.slice(index + 2);
+
+        if (idleTag && line.trim().toUpperCase() === 'DONE') {
+          write(`${idleTag} OK IDLE terminated\r\n`);
+          idleTag = null;
+          continue;
+        }
 
         if (awaitingAuthTag) {
           const tag = awaitingAuthTag;

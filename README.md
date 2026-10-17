@@ -16,7 +16,8 @@
 ## 功能
 
 - 同时监控多个邮箱账号
-- IMAP IDLE 实时监听：在每次 Cron 调用内保持连接，新邮件到达立即转发（可配置窗口）
+- IMAP IDLE 实时监听（实验性）：在每次 Cron 调用内保持连接，新邮件到达立即转发
+- 默认短轮询：每次 Cron 在 45 秒窗口内每 20 秒检查一次，验证码通常 20 秒内到达
 - 自动监控 `INBOX`，并自动发现 `Junk` / `Spam` / `垃圾邮件` 文件夹
 - 垃圾邮件可以转发到单独的 Telegram chat
 - HTML 邮件渲染为 Telegram 富文本（加粗、链接、列表、代码块、引用），自动清理脚本和样式
@@ -280,8 +281,10 @@ crons = ["*/5 * * * *"]
 | `LOGIN_NOTIFY` | `true` | 每个邮箱首次登录成功时发送一次通知 |
 | `DEDUPE` | `true` | 按 Message-ID 去重，保留 7 天 |
 | `DRY_RUN` | `false` | 只记录日志、不调用 Telegram；**仍会推进游标** |
-| `LISTEN_MODE` | `poll` | `poll` 轮询或 `idle` IDLE 窗口监听 |
+| `LISTEN_MODE` | `poll` | `poll` 轮询或 `idle` IDLE 窗口监听（IDLE 为实验性） |
 | `IDLE_WINDOW_SECONDS` | `40` | IDLE 窗口秒数（10–780），必须小于 Cron 间隔 |
+| `POLL_WINDOW_SECONDS` | `45` | 每次 Cron 保持连接的轮询窗口秒数（10–780） |
+| `POLL_INTERVAL_SECONDS` | `20` | 轮询窗口内的检查间隔秒数（5–300） |
 | `ENABLE_EVC` | `false` | 可选：启用验证码提取；网页设置里也可以开 |
 | `WEBDAV_URL` | 空 | 可选：r2-webdav 根地址（公网 http/https） |
 | `WEBDAV_USERNAME` | 空 | 可选：WebDAV 用户名 |
@@ -352,7 +355,19 @@ Authorization: Bearer <ADMIN_TOKEN>
 - `INITIAL_SYNC=skip`（默认）：记录每个文件夹当前最大 UID，不转发已有邮件。
 - `INITIAL_SYNC=latest`：转发每个文件夹最新的一封，然后记录游标。
 
-### IDLE 监听模式
+### 轮询模式（默认）
+
+`LISTEN_MODE=poll` 时，每次 Cron 会保持连接一小段时间，并在窗口内反复检查：
+
+- 默认 `POLL_WINDOW_SECONDS=45`、`POLL_INTERVAL_SECONDS=20`
+- 一次 Cron 内大约在 0s、20s、40s 检查三次
+- 两次检查之间最多约 20 秒；下一分钟 Cron 继续
+- 验证码通常在 20 秒左右进入剪贴板，不会等到下一分钟
+- 只登录一次，不需要每个检查点重新连接
+
+如果邮箱较多或服务商限制频繁查询，可以把间隔调回 30–60 秒；如果 Cron 改成 5/15 分钟，窗口也要相应调大。
+
+### IDLE 监听模式（实验性）
 
 把 `LISTEN_MODE` 设为 `idle`（或在控制台「设置 → 监听模式」选择 IDLE）后：
 

@@ -594,7 +594,7 @@ code{
       '<span>语言：' + esc(data.language || '—') + '</span>' +
       '<span>时区：' + esc(data.timeZone || '—') + '</span>' +
       '<span>首次同步：' + esc(data.initialSync || '—') + '</span>' +
-      '<span>监听：' + (data.listenMode === 'idle' ? 'IDLE ' + (data.idleWindowSeconds || 40) + ' 秒' : '轮询') + '</span>' +
+      '<span>监听：' + (data.listenMode === 'idle' ? 'IDLE ' + (data.idleWindowSeconds || 40) + ' 秒' : '轮询 ' + (data.pollIntervalSeconds || 20) + ' 秒') + '</span>' +
       '<span>模式：' + (data.dryRun ? 'DRY RUN（不发送）' : '正常发送') + '</span>';
 
     if (!mailboxes.length) {
@@ -708,7 +708,7 @@ code{
       '<option value="latest"' + (general.initialSync === 'latest' ? ' selected' : '') + '>latest（只发最新一封）</option>';
     var listenOptions =
       '<option value="poll"' + (general.listenMode !== 'idle' ? ' selected' : '') + '>轮询（Cron）</option>' +
-      '<option value="idle"' + (general.listenMode === 'idle' ? ' selected' : '') + '>IDLE 实时监听</option>';
+      '<option value="idle"' + (general.listenMode === 'idle' ? ' selected' : '') + '>IDLE 实时监听（实验性）</option>';
 
     $('settingsForm').innerHTML =
       '<section class="form-section">' +
@@ -742,6 +742,8 @@ code{
           '<label class="field"><span>首次运行</span><select id="setInitialSync">' + syncOptions + '</select></label>' +
           '<label class="field"><span>监听模式</span><select id="setListenMode">' + listenOptions + '</select></label>' +
           '<label class="field"><span>IDLE 窗口（秒）</span><input id="setIdleWindow" type="number" min="10" max="780" value="' + (general.idleWindowSeconds || 40) + '"></label>' +
+          '<label class="field"><span>轮询窗口（秒）</span><input id="setPollWindow" type="number" min="10" max="780" value="' + (general.pollWindowSeconds || 45) + '"></label>' +
+          '<label class="field"><span>轮询间隔（秒）</span><input id="setPollInterval" type="number" min="5" max="300" value="' + (general.pollIntervalSeconds || 20) + '"></label>' +
           '<label class="field"><span>正文最大字符数</span><input id="setMaxEmailChars" type="number" min="100" max="20000" value="' + (general.maxEmailChars || 3000) + '"></label>' +
           '<label class="field"><span>单封邮件最大字节数</span><input id="setMaxEmailBytes" type="number" min="1024" max="26214400" value="' + (general.maxEmailBytes || 10485760) + '"></label>' +
           '<label class="field"><span>每文件夹每轮最多处理</span><input id="setMaxMessagesPerRun" type="number" min="1" max="200" value="' + (general.maxMessagesPerRun || 20) + '"></label>' +
@@ -749,7 +751,7 @@ code{
           '<label class="checkbox-field field"><input id="setDedupe" type="checkbox"' + (general.dedupe ? ' checked' : '') + '><span>按 Message-ID 去重</span></label>' +
           '<label class="checkbox-field field"><input id="setDryRun" type="checkbox"' + (general.dryRun ? ' checked' : '') + '><span>DRY RUN（只记录，不发送 Telegram）</span></label>' +
         '</div>' +
-        '<p class="settings-note">IDLE 模式会在每次 Cron 中保持 IMAP 连接一段时间，邮件到达立即转发；窗口必须小于 Cron 间隔。每分钟 Cron 建议 30–40 秒。</p>' +
+        '<p class="settings-note">轮询模式：窗口内每 N 秒检查一次，窗口需小于 Cron 间隔，默认 45 秒窗口 / 20 秒间隔；IDLE 模式为实验性实时监听，窗口默认 40 秒。</p>' +
       '</section>';
     $('saveSettingsBtn').disabled = !keyOk;
   }
@@ -819,6 +821,8 @@ code{
         initialSync: $('setInitialSync').value,
         listenMode: $('setListenMode').value,
         idleWindowSeconds: Number($('setIdleWindow').value),
+        pollWindowSeconds: Number($('setPollWindow').value),
+        pollIntervalSeconds: Number($('setPollInterval').value),
         loginNotify: $('setLoginNotify').checked,
         dedupe: $('setDedupe').checked,
         dryRun: $('setDryRun').checked

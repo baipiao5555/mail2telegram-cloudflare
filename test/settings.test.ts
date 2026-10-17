@@ -42,6 +42,8 @@ function makeSettings(overrides: Partial<StoredSettings> = {}): StoredSettings {
     dryRun: false,
     listenMode: 'poll',
     idleWindowSeconds: 40,
+    pollWindowSeconds: 45,
+    pollIntervalSeconds: 20,
     mailboxes: [
       {
         email: 'user@gmail.com',

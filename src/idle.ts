@@ -25,13 +25,22 @@ export interface IdleOptions {
   windowMs?: number;
 }
 
-export interface IdleSummary {
+export interface WindowOptions {
+  mode: 'idle' | 'poll';
+  windowMs: number;
+  intervalMs: number;
+}
+
+export interface WindowSummary {
   startedAt: string;
   finishedAt: string;
-  listenMode: 'idle';
+  listenMode: 'idle' | 'poll';
   windowSeconds: number;
+  intervalSeconds: number;
   mailboxes: MailboxSummary[];
 }
+
+export type IdleSummary = WindowSummary;
 
 function mergeSummary(target: FolderSummary, next: FolderSummary): void {
   target.newMessages += next.newMessages;
@@ -133,7 +142,7 @@ async function watchFolder(
   folder: FolderInfo,
   store: StateStore,
   sender: TelegramSenderOptions,
-  windowMs: number,
+  options: WindowOptions,
 ): Promise<FolderSummary> {
   const summary: FolderSummary = {
     name: folder.name,
@@ -146,7 +155,11 @@ async function watchFolder(
     remaining: 0,
   };
 
-  const client = clientFor(mailbox, config, Date.now() + windowMs + POST_WINDOW_BUDGET_MS);
+  const client = clientFor(
+    mailbox,
+    config,
+    Date.now() + options.windowMs + POST_WINDOW_BUDGET_MS,
+  );
   let useIdle = false;
 
   try {
@@ -154,8 +167,8 @@ async function watchFolder(
     await client.login(mailbox.email, mailbox.password);
     mergeSummary(summary, await pollFolder(client, mailbox, folder, config, sender, store));
 
-    const endAt = Date.now() + windowMs;
-    useIdle = client.capabilities.has('IDLE');
+    const endAt = Date.now() + options.windowMs;
+    useIdle = options.mode === 'idle' && client.capabilities.has('IDLE');
 
     while (Date.now() < endAt) {
       if (useIdle) {
@@ -177,7 +190,11 @@ async function watchFolder(
           break;
         }
       } else {
-        await sleep(Math.min(FALLBACK_POLL_INTERVAL_MS, Math.max(1, endAt - Date.now())));
+        const wait = Math.min(options.intervalMs, Math.max(1, endAt - Date.now()));
+        if (wait <= 0) {
+          break;
+        }
+        await sleep(wait);
         if (Date.now() >= endAt) {
           break;
         }
@@ -207,7 +224,7 @@ async function idleAccount(
   mailbox: Mailbox,
   store: StateStore,
   sender: TelegramSenderOptions,
-  windowMs: number,
+  options: WindowOptions,
   now: Date,
 ): Promise<MailboxSummary> {
   const summary: MailboxSummary = { email: mailbox.email, folders: [] };
@@ -245,7 +262,7 @@ async function idleAccount(
   const tasks = folders.map(
     (folder) => async (): Promise<FolderSummary> => {
       try {
-        return await watchFolder(config, mailbox, folder, store, sender, windowMs);
+        return await watchFolder(config, mailbox, folder, store, sender, options);
       } catch (error) {
         return {
           name: folder.name,
@@ -304,15 +321,16 @@ async function idleAccount(
 }
 
 /**
- * Holds IMAP IDLE connections for one cron invocation. Workers cannot keep a
- * connection alive across invocations, so the window should be shorter than the
- * cron interval. New mail arriving during the window is forwarded immediately.
+ * Holds IMAP connections for one cron invocation. In idle mode the server
+ * pushes EXISTS notifications; in poll mode the folder is checked every
+ * intervalMs. Workers cannot keep a connection alive across invocations, so the
+ * window should be shorter than the cron interval.
  */
-export async function idleAll(
+async function windowAll(
   env: Env,
   config: AppConfig,
-  options: IdleOptions = {},
-): Promise<IdleSummary> {
+  options: WindowOptions,
+): Promise<WindowSummary> {
   if (!env.MAIL2TG_KV) {
     throw new Error('MAIL2TG_KV binding is missing');
   }
@@ -323,10 +341,6 @@ export async function idleAll(
     throw new Error('TELEGRAM_CHAT_ID is not configured');
   }
 
-  const windowMs = Math.max(
-    10_000,
-    options.windowMs ?? config.idleWindowSeconds * 1000,
-  );
   const now = new Date();
   const startedAt = now.toISOString();
   const store = new StateStore(env.MAIL2TG_KV);
@@ -335,12 +349,12 @@ export async function idleAll(
   const tasks = config.mailboxes.map(
     (mailbox) => async (): Promise<MailboxSummary> => {
       try {
-        return await idleAccount(config, mailbox, store, sender, windowMs, now);
+        return await idleAccount(config, mailbox, store, sender, options, now);
       } catch (error) {
         const message = telegramErrorForLog(error, config.telegramToken);
         console.error(
           JSON.stringify({
-            event: 'idle-mailbox-crashed',
+            event: 'window-mailbox-crashed',
             mailbox: mailbox.email,
             error: message,
           }),
@@ -355,8 +369,38 @@ export async function idleAll(
   return {
     startedAt,
     finishedAt: new Date().toISOString(),
-    listenMode: 'idle',
-    windowSeconds: Math.round(windowMs / 1000),
+    listenMode: options.mode,
+    windowSeconds: Math.round(options.windowMs / 1000),
+    intervalSeconds: Math.round(options.intervalMs / 1000),
     mailboxes,
   };
+}
+
+export async function idleAll(
+  env: Env,
+  config: AppConfig,
+  options: IdleOptions = {},
+): Promise<WindowSummary> {
+  const windowMs = Math.max(
+    10_000,
+    options.windowMs ?? config.idleWindowSeconds * 1000,
+  );
+  return windowAll(env, config, {
+    mode: 'idle',
+    windowMs,
+    intervalMs: FALLBACK_POLL_INTERVAL_MS,
+  });
+}
+
+export async function pollWindowAll(
+  env: Env,
+  config: AppConfig,
+): Promise<WindowSummary> {
+  const windowMs = Math.max(10_000, config.pollWindowSeconds * 1000);
+  const intervalMs = Math.max(5_000, config.pollIntervalSeconds * 1000);
+  return windowAll(env, config, {
+    mode: 'poll',
+    windowMs,
+    intervalMs,
+  });
 }

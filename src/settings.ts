@@ -43,6 +43,8 @@ export interface MaskedSettings {
     dryRun: boolean;
     listenMode: string;
     idleWindowSeconds: number;
+    pollWindowSeconds: number;
+    pollIntervalSeconds: number;
   };
   verification: {
     enabled: boolean;
@@ -253,6 +255,8 @@ export function maskSettings(
       dryRun: settings.dryRun,
       listenMode: settings.listenMode ?? 'poll',
       idleWindowSeconds: settings.idleWindowSeconds ?? 40,
+      pollWindowSeconds: settings.pollWindowSeconds ?? 45,
+      pollIntervalSeconds: settings.pollIntervalSeconds ?? 20,
     },
     verification: {
       enabled: Boolean(settings.verification?.enabled),
@@ -436,6 +440,8 @@ export function mergeSubmittedSettings(
     | 'dryRun'
     | 'listenMode'
     | 'idleWindowSeconds'
+    | 'pollWindowSeconds'
+    | 'pollIntervalSeconds'
   >;
   const nextGeneral: GeneralSettings = {
     language: existing.language,
@@ -449,6 +455,8 @@ export function mergeSubmittedSettings(
     dryRun: existing.dryRun,
     listenMode: existing.listenMode ?? 'poll',
     idleWindowSeconds: existing.idleWindowSeconds ?? 40,
+    pollWindowSeconds: existing.pollWindowSeconds ?? 45,
+    pollIntervalSeconds: existing.pollIntervalSeconds ?? 20,
   };
   if (general) {
     if (general.language !== undefined) {
@@ -489,6 +497,16 @@ export function mergeSubmittedSettings(
       general,
       'idleWindowSeconds',
       existing.idleWindowSeconds ?? 40,
+    );
+    nextGeneral.pollWindowSeconds = readOptionalNumber(
+      general,
+      'pollWindowSeconds',
+      existing.pollWindowSeconds ?? 45,
+    );
+    nextGeneral.pollIntervalSeconds = readOptionalNumber(
+      general,
+      'pollIntervalSeconds',
+      existing.pollIntervalSeconds ?? 20,
     );
     nextGeneral.loginNotify = readOptionalBoolean(
       general,

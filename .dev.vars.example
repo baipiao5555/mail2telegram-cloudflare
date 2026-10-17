@@ -21,4 +21,6 @@ MAILBOXES=[{"email":"you@gmail.com","password":"app-password","host":"imap.gmail
 
 # Optional: IMAP listener
 # LISTEN_MODE=poll
+# POLL_WINDOW_SECONDS=45
+# POLL_INTERVAL_SECONDS=20
 # IDLE_WINDOW_SECONDS=40

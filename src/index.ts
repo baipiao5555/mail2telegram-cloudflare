@@ -6,7 +6,7 @@ import {
   type Env,
   type StoredSettings,
 } from './env';
-import { idleAll } from './idle';
+import { idleAll, pollWindowAll } from './idle';
 import { pollAll } from './poll';
 import {
   deleteStoredSettings,
@@ -119,6 +119,8 @@ async function handleStatus(env: Env): Promise<Response> {
     dryRun: config.dryRun,
     listenMode: config.listenMode,
     idleWindowSeconds: config.idleWindowSeconds,
+    pollWindowSeconds: config.pollWindowSeconds,
+    pollIntervalSeconds: config.pollIntervalSeconds,
     configSource: loaded.source,
     mailboxes,
   });
@@ -390,14 +392,13 @@ export default {
       const summary =
         config.listenMode === 'idle'
           ? await idleAll(env, config)
-          : await pollAll(env, config);
+          : await pollWindowAll(env, config);
       console.log(
         JSON.stringify({
           event: 'poll-complete',
           cron: controller.cron,
           scheduledTime: controller.scheduledTime,
           configSource: source,
-          listenMode: config.listenMode,
           ...summary,
         }),
       );

@@ -18,6 +18,8 @@ export interface Env {
   WEBDAV_PATH?: string;
   LISTEN_MODE?: string;
   IDLE_WINDOW_SECONDS?: string;
+  POLL_WINDOW_SECONDS?: string;
+  POLL_INTERVAL_SECONDS?: string;
   LANGUAGE?: string;
   TIMEZONE?: string;
   MAX_EMAIL_CHARS?: string;
@@ -75,6 +77,8 @@ export interface StoredSettings {
   dryRun: boolean;
   listenMode?: ListenMode;
   idleWindowSeconds?: number;
+  pollWindowSeconds?: number;
+  pollIntervalSeconds?: number;
   mailboxes: StoredMailbox[];
   verification?: VerificationSettings;
 }
@@ -95,6 +99,8 @@ export interface AppConfig {
   dryRun: boolean;
   listenMode: ListenMode;
   idleWindowSeconds: number;
+  pollWindowSeconds: number;
+  pollIntervalSeconds: number;
   mailboxes: Mailbox[];
   verification: VerificationSettings;
 }
@@ -426,6 +432,18 @@ export function buildConfigFromStoredSettings(
     10,
     780,
   );
+  const pollWindowSeconds = requireNumber(
+    settings.pollWindowSeconds ?? 45,
+    'POLL_WINDOW_SECONDS',
+    10,
+    780,
+  );
+  const pollIntervalSeconds = requireNumber(
+    settings.pollIntervalSeconds ?? 20,
+    'POLL_INTERVAL_SECONDS',
+    5,
+    300,
+  );
 
   const mailboxes = settings.mailboxes.map((mailbox, index) => {
     if (typeof mailbox !== 'object' || mailbox === null || Array.isArray(mailbox)) {
@@ -464,6 +482,8 @@ export function buildConfigFromStoredSettings(
     dryRun,
     listenMode,
     idleWindowSeconds,
+    pollWindowSeconds,
+    pollIntervalSeconds,
     mailboxes,
     verification: normalizeVerificationSettings(settings.verification),
   };
@@ -485,6 +505,8 @@ export function defaultStoredSettings(): StoredSettings {
     dryRun: false,
     listenMode: 'poll',
     idleWindowSeconds: 40,
+    pollWindowSeconds: 45,
+    pollIntervalSeconds: 20,
     mailboxes: [],
     verification: defaultVerificationSettings(),
   };
@@ -526,6 +548,8 @@ export function settingsFromEnv(env: Env): StoredSettings {
     dryRun: parseBoolEnv(env.DRY_RUN, false),
     listenMode: (env.LISTEN_MODE?.trim().toLowerCase() === 'idle' ? 'idle' : 'poll') as ListenMode,
     idleWindowSeconds: parseIntEnv(env.IDLE_WINDOW_SECONDS, 40),
+    pollWindowSeconds: parseIntEnv(env.POLL_WINDOW_SECONDS, 45),
+    pollIntervalSeconds: parseIntEnv(env.POLL_INTERVAL_SECONDS, 20),
     mailboxes: parseMailboxes(env.MAILBOXES).map(storedMailboxFromMailbox),
     verification: {
       enabled: parseBoolEnv(env.ENABLE_EVC ?? env.ENABLE_VERIFICATION_CODE, false),

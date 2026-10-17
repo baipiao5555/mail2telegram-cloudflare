@@ -49,6 +49,8 @@ function makeConfig(port: number, overrides: Partial<AppConfig> = {}): AppConfig
     dryRun: false,
     listenMode: 'poll',
     idleWindowSeconds: 40,
+    pollWindowSeconds: 45,
+    pollIntervalSeconds: 20,
     verification: {
       enabled: false,
       webdavUrl: '',

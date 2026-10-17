@@ -11,3 +11,10 @@ ADMIN_TOKEN=replace-with-a-long-random-token
 # Generate with: openssl rand -hex 32
 SETTINGS_KEY=replace-with-64-hex-characters
 MAILBOXES=[{"email":"you@gmail.com","password":"app-password","host":"imap.gmail.com","port":993}]
+
+# Optional: verification code -> SyncClipboard WebDAV
+# ENABLE_EVC=false
+# WEBDAV_URL=
+# WEBDAV_USERNAME=
+# WEBDAV_PASSWORD=
+# WEBDAV_PATH=SyncClipboard.json

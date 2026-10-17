@@ -191,3 +191,25 @@ export function assertTelegramApiUrl(url: URL): void {
     throw new Error('unexpected Telegram API port');
   }
 }
+
+/** Validates a user-configured HTTP endpoint before the Worker makes a request to it. */
+export function assertSafeHttpUrl(rawUrl: string): URL {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error('invalid URL');
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('only http and https URLs are allowed');
+  }
+  if (url.username !== '' || url.password !== '') {
+    throw new Error('credentials must not be embedded in the URL');
+  }
+  if (url.port === '25') {
+    throw new Error('port 25 is blocked by the Workers runtime');
+  }
+  const hostname = url.hostname.replace(/^\[|\]$/g, '');
+  assertSafeHost(hostname);
+  return url;
+}

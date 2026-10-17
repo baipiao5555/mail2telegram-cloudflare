@@ -692,6 +692,7 @@ code{
 
     var telegram = data.telegram || {};
     var general = data.general || {};
+    var verification = data.verification || {};
     var mailboxes = data.mailboxes || [];
     var mailboxHtml = mailboxes.map(mailboxEditorHtml).join('');
     if (!mailboxes.length) {
@@ -713,6 +714,17 @@ code{
           '<label class="field"><span>普通邮件 Chat ID</span><input id="setChatId" type="text" value="' + esc(telegram.chatId || '') + '" placeholder="-1001234567890"></label>' +
           '<label class="field"><span>垃圾邮件 Chat ID（可选）</span><input id="setJunkChatId" type="text" value="' + esc(telegram.junkChatId || '') + '" placeholder="留空则不转发垃圾邮件"></label>' +
         '</div>' +
+      '</section>' +
+      '<section class="form-section">' +
+        '<h3>验证码 → SyncClipboard WebDAV</h3>' +
+        '<div class="form-grid">' +
+          '<label class="checkbox-field field"><input id="setVerificationEnabled" type="checkbox"' + (verification.enabled ? ' checked' : '') + '><span>提取验证码并推送到 WebDAV</span></label>' +
+          '<label class="field"><span>WebDAV URL</span><input id="setWebdavUrl" type="text" value="' + esc(verification.webdavUrl || '') + '" placeholder="https://your-r2-webdav.workers.dev"></label>' +
+          '<label class="field"><span>用户名</span><input id="setWebdavUsername" type="text" value="' + esc(verification.webdavUsername || '') + '" autocomplete="username"></label>' +
+          '<label class="field"><span>密码</span><input id="setWebdavPassword" type="password" value="" placeholder="' + (verification.passwordConfigured ? '已设置，留空保持不变' : 'WebDAV 密码') + '" autocomplete="new-password"></label>' +
+          '<label class="field"><span>文件路径</span><input id="setWebdavPath" type="text" value="' + esc(verification.webdavPath || 'SyncClipboard.json') + '" placeholder="SyncClipboard.json"></label>' +
+        '</div>' +
+        '<p class="settings-note">写入 <code>WebDAV URL + 文件路径</code>，JSON 兼容 Fcitx5-SyncClipboard / SyncClipboard；只允许公网 http/https。</p>' +
       '</section>' +
       '<section class="form-section">' +
         '<div class="section-head"><h3>邮箱账号</h3><button id="addMailboxBtn" class="btn ghost" type="button">添加邮箱</button></div>' +
@@ -801,6 +813,13 @@ code{
         loginNotify: $('setLoginNotify').checked,
         dedupe: $('setDedupe').checked,
         dryRun: $('setDryRun').checked
+      },
+      verification: {
+        enabled: $('setVerificationEnabled').checked,
+        webdavUrl: $('setWebdavUrl').value.trim(),
+        webdavUsername: $('setWebdavUsername').value.trim(),
+        webdavPassword: $('setWebdavPassword').value,
+        webdavPath: $('setWebdavPath').value.trim()
       },
       mailboxes: mailboxes
     };

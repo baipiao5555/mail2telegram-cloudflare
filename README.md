@@ -18,8 +18,9 @@
 - 同时监控多个邮箱账号
 - 自动监控 `INBOX`，并自动发现 `Junk` / `Spam` / `垃圾邮件` 文件夹
 - 垃圾邮件可以转发到单独的 Telegram chat
+- HTML 邮件渲染为 Telegram 富文本（加粗、链接、列表、代码块、引用），自动清理脚本和样式
+- 自动提取验证码并推送到 SyncClipboard WebDAV，兼容 Fcitx5-SyncClipboard
 - 支持 Gmail 应用密码、QQ 邮箱授权码等标准 IMAP 登录方式
-- HTML 邮件转纯文本，自动清理脚本、样式和多余空白
 - 自动识别转发邮件，显示原始收件人和原始发件人
 - 首次运行可跳过历史邮件，或只转发每个文件夹最新的一封
 - 邮件过大时只发送提醒，不下载正文
@@ -39,7 +40,7 @@
 | `config.py` | Wrangler secrets / vars |
 | 本地日志文件 | Workers Logs / `wrangler tail` |
 | 断线重连、线程模型 | 每次运行重新连接，失败后下次 Cron 重试 |
-| 验证码提取扩展（EVC） | 未移植 |
+| 验证码提取扩展（EVC） | 已内置：正则提取 + WebDAV/SyncClipboard 推送 |
 | 附件 | 只通知正文，不转发附件 |
 
 Cloudflare Workers 无法运行常驻守护进程，因此不能保持 IMAP IDLE 连接。轮询是 Workers 上最稳定、成本最低的实现方式。
@@ -278,6 +279,11 @@ crons = ["*/5 * * * *"]
 | `LOGIN_NOTIFY` | `true` | 每个邮箱首次登录成功时发送一次通知 |
 | `DEDUPE` | `true` | 按 Message-ID 去重，保留 7 天 |
 | `DRY_RUN` | `false` | 只记录日志、不调用 Telegram；**仍会推进游标** |
+| `ENABLE_EVC` | `false` | 可选：启用验证码提取；网页设置里也可以开 |
+| `WEBDAV_URL` | 空 | 可选：r2-webdav 根地址（公网 http/https） |
+| `WEBDAV_USERNAME` | 空 | 可选：WebDAV 用户名 |
+| `WEBDAV_PASSWORD` | 空 | 可选：WebDAV 密码（建议用 secret） |
+| `WEBDAV_PATH` | `SyncClipboard.json` | 可选：写入的 JSON 路径 |
 
 ## HTTP 端点
 
@@ -359,11 +365,70 @@ KV 是最终一致的，极少数情况下不同地区的 Cron 可能读到旧�
 
 ### 大邮件与附件
 
-超过 `MAX_EMAIL_BYTES` 的邮件只抓取 `FROM / SUBJECT / DATE / MESSAGE-ID` 等头信息并发送提醒。附件不会被下载或转发，只转发正文纯文本。
+超过 `MAX_EMAIL_BYTES` 的邮件只抓取 `FROM / SUBJECT / DATE / MESSAGE-ID` 等头信息并发送提醒。附件不会被下载或转发，只转发正文。
 
-### 未移植的功能
+### HTML 邮件渲染
 
-原项目的 `ENABLE_EVC`（提取验证码并同步到剪贴板）依赖额外的 Python 服务和 SyncClipboard，本项目没有移植。需要的话可以在此 Worker 中自行增加本地正则提取，或调用外部服务。
+HTML 邮件会转换成 Telegram 支持的富文本：
+
+- `<b>` / `<strong>` → 加粗
+- `<i>` / `<em>` → 斜体
+- `<u>` / `<ins>` → 下划线
+- `<s>` / `<strike>` / `<del>` → 删除线
+- `<a href>` → 链接（只保留 http/https）
+- `<ul>` / `<ol>` / `<li>` → 项目符号
+- `<pre>` / `<code>` → 代码块
+- `<blockquote>` → 引用
+
+`script`、`style`、`iframe`、`svg` 等标签会被移除；文本节点和链接属性都会转义，邮件内容无法注入 Telegram 标记。超长正文会退回纯文本，避免 HTML 标签被分片截断。
+
+### 验证码 → SyncClipboard WebDAV
+
+在控制台「设置」页启用「提取验证码并推送到 WebDAV」，填写：
+
+- **WebDAV URL**：r2-webdav 根地址，例如 `https://webdav.example.com`
+- **用户名 / 密码**：r2-webdav 的 `USERNAME` / `PASSWORD`
+- **文件路径**：默认 `SyncClipboard.json`
+
+提取逻辑：在邮件主题和正文中查找“验证码 / 校验码 / verification code / OTP / PIN”等关键词附近的 4–8 位数字或字母数字组合（至少包含一个数字），然后 PUT 到：
+
+```text
+<WebDAV URL>/<文件路径>
+```
+
+JSON 格式兼容 Fcitx5-SyncClipboard 和 SyncClipboard：
+
+```json
+{
+  "type": "Text",
+  "text": "123456",
+  "hash": "8D969EEF6ECAD3C29A3A629280E686CF0C3F5D5A86AFF3CA12020C923ADC6C92",
+  "hasData": false,
+  "dataName": "",
+  "size": 6
+}
+```
+
+- `hash`：验证码 UTF-8 文本的 SHA-256 大写十六进制
+- `size`：UTF-8 字节数
+- 邮件仍会正常转发到 Telegram；WebDAV 推送失败只记录日志，不会阻断邮件转发
+- WebDAV 只允许公网 `http/https`，拒绝 localhost、私有/保留地址和重定向
+- 用户名和密码保存在加密配置中，不会回显
+
+r2-webdav 部署：
+
+```bash
+git clone https://github.com/7hgyk/r2-webdav
+cd r2-webdav
+# 修改 wrangler.toml 里的 R2 bucket
+npx wrangler secret put USERNAME
+npx wrangler secret put PASSWORD
+npm run deploy
+```
+
+然后在 Fcitx5-SyncClipboard 中把 WebDAV 地址填成同一个根地址，使用相同的用户名和密码，它会读取同一个 `SyncClipboard.json`。
+
+> 环境变量方式也支持：`ENABLE_EVC=true`、`WEBDAV_URL`、`WEBDAV_USERNAME`、`WEBDAV_PASSWORD`、`WEBDAV_PATH`。保存过网页设置后，KV 配置优先。
 
 ## 本地开发
 
@@ -397,9 +462,11 @@ npm run deploy -- --dry-run
 - IMAP 响应/literal 解析
 - 真实 IMAP 客户端流程（对本地假 IMAP 服务器）
 - 首次基线、增量拉取、UIDVALIDITY 重置、垃圾邮件分流、每轮上限、大邮件提醒、去重
-- 邮件解码与 HTML 转文本
+- 邮件解码、HTML → Telegram 富文本渲染与安全过滤
+- 验证码提取（数字/字母数字、空格/连字符分隔）
+- WebDAV 推送：URL/路径、Basic Auth、SyncClipboard JSON、SHA-256、重定向和私网拒绝
 - Telegram 分片、429 重试、HTML 退化
-- 配置校验、私网地址拒绝、HTTP 鉴权
+- 配置校验、私网地址拒绝、HTTP 鉴权、加密设置存储
 
 实现阶段还在本机 Workerd 中对真实 Gmail IMAP 做了 TLS 握手和 capability 解析验证（不涉及账号凭据）。
 
@@ -410,7 +477,8 @@ npm run deploy -- --dry-run
 - Telegram 请求固定为 `https://api.telegram.org`，并禁止重定向。
 - 密码、Bot Token 只通过 Wrangler secrets 或加密后的 KV 配置保存，不写入日志；错误信息会过滤 Token。
 - 网页设置使用 AES-GCM 加密后存入 KV，主密钥 `SETTINGS_KEY` 只保存在 Worker secret 中；设置接口不会回显密码或 Token。
-- Telegram 消息内容统一做 HTML 转义，邮件内容无法注入 Telegram 标记。
+- HTML 邮件会先清洗再渲染，只保留 Telegram 支持的标签，文本节点和链接属性均转义；超长正文退回纯文本。
+- WebDAV 请求前校验 URL，只允许公网 http/https，拒绝 localhost、环回、私有/保留地址和重定向；Basic 凭据不写入日志。
 - `/status`、`/run`、`/telegram/test`、`/api/settings` 需要 `ADMIN_TOKEN`。
 
 ## 常见问题

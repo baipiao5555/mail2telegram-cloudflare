@@ -34,6 +34,8 @@ describe('parseRawEmail', () => {
     expect(mail.subject).toBe('你好');
     expect(mail.from).toContain('ming@example.com');
     expect(mail.content).toBe('Hello & 世界');
+    expect(mail.contentHtml).toContain('Hello &amp; 世界');
+    expect(mail.contentHtml).not.toContain('<script');
     expect(mail.messageId).toBe('abc@example.com');
     expect(mail.deliveredTo).toBeUndefined();
   });

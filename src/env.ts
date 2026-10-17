@@ -1,4 +1,4 @@
-import { assertSafeHost } from './security';
+import { assertSafeHost, assertSafeHttpUrl } from './security';
 import { loadStoredSettings } from './settings';
 import { isValidTimeZone, parseIntEnv, parseBoolEnv } from './util';
 
@@ -10,6 +10,12 @@ export interface Env {
   MAILBOXES?: string;
   ADMIN_TOKEN?: string;
   SETTINGS_KEY?: string;
+  ENABLE_EVC?: string;
+  ENABLE_VERIFICATION_CODE?: string;
+  WEBDAV_URL?: string;
+  WEBDAV_USERNAME?: string;
+  WEBDAV_PASSWORD?: string;
+  WEBDAV_PATH?: string;
   LANGUAGE?: string;
   TIMEZONE?: string;
   MAX_EMAIL_CHARS?: string;
@@ -23,6 +29,14 @@ export interface Env {
 
 export type Language = 'Chinese' | 'English';
 export type InitialSync = 'skip' | 'latest';
+
+export interface VerificationSettings {
+  enabled: boolean;
+  webdavUrl: string;
+  webdavUsername: string;
+  webdavPassword: string;
+  webdavPath: string;
+}
 
 export interface Mailbox {
   id: string;
@@ -57,6 +71,7 @@ export interface StoredSettings {
   dedupe: boolean;
   dryRun: boolean;
   mailboxes: StoredMailbox[];
+  verification?: VerificationSettings;
 }
 
 export interface AppConfig {
@@ -74,6 +89,7 @@ export interface AppConfig {
   dedupe: boolean;
   dryRun: boolean;
   mailboxes: Mailbox[];
+  verification: VerificationSettings;
 }
 
 export interface LoadedConfig {
@@ -267,6 +283,80 @@ function requireBoolean(value: unknown, field: string): boolean {
   return value;
 }
 
+export function defaultVerificationSettings(): VerificationSettings {
+  return {
+    enabled: false,
+    webdavUrl: '',
+    webdavUsername: '',
+    webdavPassword: '',
+    webdavPath: 'SyncClipboard.json',
+  };
+}
+
+function normalizeVerificationSettings(value: unknown): VerificationSettings {
+  if (value === undefined || value === null) {
+    return defaultVerificationSettings();
+  }
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('verification must be an object');
+  }
+  const record = value as Record<string, unknown>;
+
+  const enabled =
+    record.enabled === undefined ? false : requireBoolean(record.enabled, 'verification.enabled');
+
+  const read = (key: string, field: string, fallback: string): string => {
+    const raw = record[key];
+    if (raw === undefined || raw === null) {
+      return fallback;
+    }
+    if (typeof raw !== 'string') {
+      throw new Error(`${field} must be a string`);
+    }
+    return raw;
+  };
+
+  const webdavUrl = read('webdavUrl', 'verification.webdavUrl', '').trim();
+  const webdavUsername = read('webdavUsername', 'verification.webdavUsername', '').trim();
+  const webdavPassword = read('webdavPassword', 'verification.webdavPassword', '');
+  let webdavPath = read('webdavPath', 'verification.webdavPath', 'SyncClipboard.json').trim();
+
+  webdavPath = webdavPath.replace(/^\/+/, '');
+  if (webdavPath === '') {
+    webdavPath = 'SyncClipboard.json';
+  }
+  if (`/${webdavPath}/`.includes('/../') || /[?#\u0000-\u001f]/.test(webdavPath)) {
+    throw new Error('verification.webdavPath must not contain .., ?, #, or control characters');
+  }
+  if (webdavUsername.includes(':') || /[\r\n\u0000]/.test(webdavUsername)) {
+    throw new Error('verification.webdavUsername must not contain ":" or newlines');
+  }
+  if (/[\r\n\u0000]/.test(webdavPassword)) {
+    throw new Error('verification.webdavPassword must not contain newlines');
+  }
+
+  if (enabled && webdavUrl === '') {
+    throw new Error('verification.webdavUrl is required when verification is enabled');
+  }
+  if (enabled) {
+    try {
+      assertSafeHttpUrl(webdavUrl);
+    } catch (error) {
+      throw new Error(
+        `verification.webdavUrl: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return {
+    enabled,
+    webdavUrl,
+    webdavUsername,
+    webdavPassword,
+    webdavPath,
+  };
+}
+
 export function buildConfigFromStoredSettings(
   settings: StoredSettings,
   adminToken: string,
@@ -353,6 +443,7 @@ export function buildConfigFromStoredSettings(
     dedupe: requireBoolean(settings.dedupe, 'DEDUPE'),
     dryRun,
     mailboxes,
+    verification: normalizeVerificationSettings(settings.verification),
   };
 }
 
@@ -371,6 +462,7 @@ export function defaultStoredSettings(): StoredSettings {
     dedupe: true,
     dryRun: false,
     mailboxes: [],
+    verification: defaultVerificationSettings(),
   };
 }
 
@@ -409,6 +501,13 @@ export function settingsFromEnv(env: Env): StoredSettings {
     dedupe: parseBoolEnv(env.DEDUPE, true),
     dryRun: parseBoolEnv(env.DRY_RUN, false),
     mailboxes: parseMailboxes(env.MAILBOXES).map(storedMailboxFromMailbox),
+    verification: {
+      enabled: parseBoolEnv(env.ENABLE_EVC ?? env.ENABLE_VERIFICATION_CODE, false),
+      webdavUrl: env.WEBDAV_URL?.trim() ?? '',
+      webdavUsername: env.WEBDAV_USERNAME?.trim() ?? '',
+      webdavPassword: env.WEBDAV_PASSWORD ?? '',
+      webdavPath: env.WEBDAV_PATH?.trim() || 'SyncClipboard.json',
+    },
   };
 }
 

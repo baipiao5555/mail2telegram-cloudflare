@@ -1,9 +1,16 @@
-import type { Env, StoredMailbox, StoredSettings } from './env';
+import type { Env, StoredMailbox, StoredSettings, VerificationSettings } from './env';
 import { base64ToBytes, bytesToBase64 } from './util';
 
 const KV_KEY = 'settings:v1';
 const KEY_BYTES = 32;
 const IV_BYTES = 12;
+const EMPTY_VERIFICATION: VerificationSettings = {
+  enabled: false,
+  webdavUrl: '',
+  webdavUsername: '',
+  webdavPassword: '',
+  webdavPath: 'SyncClipboard.json',
+};
 
 export interface MaskedMailbox {
   email: string;
@@ -34,6 +41,13 @@ export interface MaskedSettings {
     loginNotify: boolean;
     dedupe: boolean;
     dryRun: boolean;
+  };
+  verification: {
+    enabled: boolean;
+    webdavUrl: string;
+    webdavUsername: string;
+    webdavPath: string;
+    passwordConfigured: boolean;
   };
   envError?: string;
 }
@@ -235,6 +249,13 @@ export function maskSettings(
       loginNotify: settings.loginNotify,
       dedupe: settings.dedupe,
       dryRun: settings.dryRun,
+    },
+    verification: {
+      enabled: Boolean(settings.verification?.enabled),
+      webdavUrl: settings.verification?.webdavUrl ?? '',
+      webdavUsername: settings.verification?.webdavUsername ?? '',
+      webdavPath: settings.verification?.webdavPath ?? 'SyncClipboard.json',
+      passwordConfigured: Boolean(settings.verification?.webdavPassword),
     },
     ...(options.envError ? { envError: options.envError } : {}),
   };
@@ -472,6 +493,45 @@ export function mergeSubmittedSettings(
     );
   }
 
+  const previousVerification = existing.verification ?? EMPTY_VERIFICATION;
+  let verification = previousVerification;
+  const verificationInput = asObject(root.verification, 'verification');
+  if (verificationInput) {
+    let webdavPassword = previousVerification.webdavPassword;
+    const passwordValue = verificationInput.webdavPassword;
+    if (passwordValue !== undefined) {
+      if (typeof passwordValue !== 'string') {
+        throw new Error('verification.webdavPassword must be a string');
+      }
+      if (passwordValue.trim() !== '') {
+        webdavPassword = passwordValue;
+      }
+    }
+    verification = {
+      enabled: readOptionalBoolean(
+        verificationInput,
+        'enabled',
+        previousVerification.enabled,
+      ),
+      webdavUrl: readOptionalString(
+        verificationInput,
+        'webdavUrl',
+        previousVerification.webdavUrl,
+      ),
+      webdavUsername: readOptionalString(
+        verificationInput,
+        'webdavUsername',
+        previousVerification.webdavUsername,
+      ),
+      webdavPassword,
+      webdavPath: readOptionalString(
+        verificationInput,
+        'webdavPath',
+        previousVerification.webdavPath,
+      ),
+    };
+  }
+
   return {
     telegramToken,
     chatId: telegram ? readOptionalString(telegram, 'chatId', existing.chatId) : existing.chatId,
@@ -480,5 +540,6 @@ export function mergeSubmittedSettings(
       : existing.junkChatId,
     ...nextGeneral,
     mailboxes,
+    verification,
   };
 }

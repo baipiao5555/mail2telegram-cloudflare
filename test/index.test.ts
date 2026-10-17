@@ -34,6 +34,13 @@ function settingsPayload() {
         port: 993,
       },
     ],
+    verification: {
+      enabled: false,
+      webdavUrl: '',
+      webdavUsername: '',
+      webdavPassword: '',
+      webdavPath: 'SyncClipboard.json',
+    },
   };
 }
 

@@ -18,6 +18,7 @@ import { FakeKV } from './helpers/fake-kv';
 
 const TEST_PASSWORD = ['test', 'credential', 'value'].join('-');
 const TEST_BOT_TOKEN = ['123456', 'ABC'].join(':');
+const TEST_WEBDAV_PASSWORD = ['dav', 'credential', 'value'].join('-');
 
 function randomKeyHex(): string {
   return Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) =>
@@ -156,6 +157,34 @@ describe('settings merge and masking', () => {
     const serialized = JSON.stringify(masked);
     expect(serialized).not.toContain(TEST_PASSWORD);
     expect(serialized).not.toContain(TEST_BOT_TOKEN);
+  });
+
+  it('masks and preserves WebDAV credentials', () => {
+    const existing = makeSettings({
+      verification: {
+        enabled: true,
+        webdavUrl: 'https://dav.example.org',
+        webdavUsername: 'dav-user',
+        webdavPassword: TEST_WEBDAV_PASSWORD,
+        webdavPath: 'SyncClipboard.json',
+      },
+    });
+    const masked = maskSettings(existing, 'kv', {
+      settingsKeyConfigured: true,
+      hasStoredSettings: true,
+    });
+    expect(masked.verification.enabled).toBe(true);
+    expect(masked.verification.passwordConfigured).toBe(true);
+    expect(JSON.stringify(masked)).not.toContain(TEST_WEBDAV_PASSWORD);
+
+    const merged = mergeSubmittedSettings(existing, {
+      verification: {
+        webdavUrl: 'https://dav2.example.org',
+        webdavPassword: '',
+      },
+    });
+    expect(merged.verification?.webdavUrl).toBe('https://dav2.example.org');
+    expect(merged.verification?.webdavPassword).toBe(TEST_WEBDAV_PASSWORD);
   });
 });
 

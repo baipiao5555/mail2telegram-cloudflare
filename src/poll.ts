@@ -8,6 +8,8 @@ import {
 import { detectForwarding, parseHeaderBlock, parseRawEmail, type ParsedMail } from './mail';
 import { StateStore, type AccountStatus } from './state';
 import { sendTelegramText, telegramErrorForLog, type TelegramSenderOptions } from './telegram';
+import { extractVerificationCode } from './verification';
+import { pushSyncClipboardText } from './webdav';
 import {
   errorMessage,
   escapeHtml,
@@ -64,7 +66,7 @@ function languageStrings(language: AppConfig['language']) {
       newMailFrom: 'New email from ',
       sender: 'Sender: ',
       date: 'Date: ',
-      content: 'Content:\n',
+      content: 'Content:',
       noSubject: '(no subject)',
       unknownSender: '(unknown sender)',
       noContent: '(no content)',
@@ -77,7 +79,7 @@ function languageStrings(language: AppConfig['language']) {
     newMailFrom: '新邮件来自 ',
     sender: '发件人: ',
     date: '日期: ',
-    content: '内容:\n',
+    content: '内容:',
     noSubject: '(无主题)',
     unknownSender: '(未知发件人)',
     noContent: '(无内容)',
@@ -98,15 +100,20 @@ function buildMailMessage(config: AppConfig, mail: ParsedMail, shownAccount: str
   const subject = truncate(mail.subject || strings.noSubject, 300);
   const sender = truncate(from || strings.unknownSender, 300);
   const account = truncate(shownAccount, 300);
-  const content = truncate(mail.content || strings.noContent, config.maxEmailChars);
-
-  return (
+  const plainContent = truncate(mail.content || strings.noContent, config.maxEmailChars);
+  const header =
     `<b>${strings.subject}</b>${escapeHtml(subject)}\n` +
     `<b>${strings.newMailFrom}${escapeHtml(account)}:</b>\n` +
     `<b>${strings.sender}</b>${escapeHtml(sender)}\n` +
     `<b>${strings.date}</b>${formatDateTime(mail.date, config.timeZone)}\n\n` +
-    `<b>${strings.content}</b>${escapeHtml(content)}`
-  );
+    `<b>${strings.content}</b>\n`;
+
+  const useHtml =
+    mail.contentHtml !== undefined &&
+    mail.content.length <= config.maxEmailChars &&
+    header.length + mail.contentHtml.length <= 3800;
+  const content = useHtml ? mail.contentHtml! : escapeHtml(plainContent);
+  return header + content;
 }
 
 function buildOversizeMessage(
@@ -199,6 +206,30 @@ async function processMessage(
   if (config.dedupe && (await store.isDuplicate(mailbox.id, mail.messageId))) {
     summary.skipped += 1;
     return;
+  }
+
+  if (config.verification?.enabled) {
+    const code = extractVerificationCode(`${mail.subject}\n${mail.content}`);
+    if (code) {
+      try {
+        await pushSyncClipboardText(config.verification, code);
+        console.log(
+          JSON.stringify({
+            event: 'verification-code-pushed',
+            mailbox: mailbox.email,
+            codeLength: code.length,
+          }),
+        );
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            event: 'verification-code-push-failed',
+            mailbox: mailbox.email,
+            error: errorMessage(error),
+          }),
+        );
+      }
+    }
   }
 
   const message = buildMailMessage(config, mail, forward.shownAccount, forward.from);

@@ -1,9 +1,11 @@
 import PostalMime, { decodeWords } from 'postal-mime';
 import type { Address, Header, Mailbox } from 'postal-mime';
+import { renderTelegramHtml } from './html';
 import { htmlToText } from './util';
 
 const MAX_HTML_INPUT_CHARS = 1_000_000;
 const MAX_PLAIN_INPUT_CHARS = 1_000_000;
+const MAX_RENDERED_TEXT_CHARS = 20_000;
 
 export interface ParsedMail {
   subject: string;
@@ -14,6 +16,7 @@ export interface ParsedMail {
   xOriginalTo?: string;
   toHeader?: string;
   content: string;
+  contentHtml?: string;
   attachments: number;
 }
 
@@ -81,6 +84,19 @@ function normalizeMessageId(value: string | undefined): string | undefined {
 
 function toParsedMail(email: Awaited<ReturnType<typeof PostalMime.parse>>): ParsedMail {
   const headers = email.headers ?? [];
+  const rendered = email.html
+    ? renderTelegramHtml(
+        email.html.slice(0, MAX_HTML_INPUT_CHARS),
+        MAX_RENDERED_TEXT_CHARS,
+      )
+    : null;
+  const textContent =
+    rendered?.text ||
+    buildContent(undefined, email.text) ||
+    buildContent(email.html, undefined);
+  const contentHtml =
+    rendered && rendered.html.trim() !== '' ? rendered.html : undefined;
+
   return {
     subject: email.subject?.trim() ?? '',
     from: addressText(email.from) || headerValue(headers, 'from') || '',
@@ -89,7 +105,8 @@ function toParsedMail(email: Awaited<ReturnType<typeof PostalMime.parse>>): Pars
     deliveredTo: email.deliveredTo?.trim() || undefined,
     xOriginalTo: headerValue(headers, 'x-original-to'),
     toHeader: headerValue(headers, 'to') || (email.to ?? []).map(addressText).join(', '),
-    content: buildContent(email.html, email.text),
+    content: textContent,
+    ...(contentHtml ? { contentHtml } : {}),
     attachments: email.attachments?.length ?? 0,
   };
 }

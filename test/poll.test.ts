@@ -47,6 +47,13 @@ function makeConfig(port: number, overrides: Partial<AppConfig> = {}): AppConfig
     loginNotify: false,
     dedupe: true,
     dryRun: false,
+    verification: {
+      enabled: false,
+      webdavUrl: '',
+      webdavUsername: '',
+      webdavPassword: '',
+      webdavPath: 'SyncClipboard.json',
+    },
     mailboxes: [
       {
         id: 'test@example.com',

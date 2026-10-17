@@ -1,17 +1,12 @@
-#:schema node_modules/wrangler/config-schema.json
 name = "mail2telegram"
 main = "src/index.ts"
-compatibility_date = "2026-10-17"
+compatibility_date = "2025-01-01"
 workers_dev = true
-upload_source_maps = true
 
 # Scheduled IMAP polling. Cron triggers have a minimum granularity of one minute.
 # Change to "*/5 * * * *" if you have many mailboxes or a provider that throttles logins.
 [triggers]
 crons = ["* * * * *"]
-
-[observability]
-enabled = true
 
 # Create with: npx wrangler kv namespace create MAIL2TG_KV
 # The Deploy to Cloudflare button provisions this namespace and replaces the id automatically.

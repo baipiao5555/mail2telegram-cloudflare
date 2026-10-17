@@ -37,7 +37,10 @@
         "description": "JSON array of mailboxes, for example `[{\"email\":\"you@gmail.com\",\"password\":\"app-password\",\"host\":\"imap.gmail.com\",\"port\":993}]`. Use an app password / authorization code, not your normal login password."
       },
       "ADMIN_TOKEN": {
-        "description": "Long random token that protects `/status`, `/run`, and `/telegram/test`. Generate one with `openssl rand -hex 32`."
+        "description": "Long random token that protects `/status`, `/run`, `/telegram/test`, and the dashboard. It can only be changed in Cloudflare."
+      },
+      "SETTINGS_KEY": {
+        "description": "32-byte encryption key for saving settings from the dashboard. Generate with `openssl rand -hex 32`. Keep it in Cloudflare only; changing it makes existing dashboard settings unreadable."
       }
     }
   }

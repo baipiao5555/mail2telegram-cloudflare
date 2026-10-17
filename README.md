@@ -26,6 +26,7 @@
 - 用 Message-ID 去重，尽量避免重复通知
 - Telegram 消息自动分片、转义、429/5xx 重试、HTML 解析失败时退化为纯文本
 - 内置可视化管理控制台，可查看邮箱/文件夹状态并手动触发运行
+- 完整网页设置：邮箱、Telegram、语言/时区/同步策略/大小限制都可以在控制台修改，配置加密存入 KV
 - 提供 `/health`、`/status`、`/run`、`/telegram/test` 管理端点
 
 ![控制台](docs/dashboard.png)
@@ -84,11 +85,12 @@ Telegram Bot API (sendMessage)
    - `TELEGRAM_CHAT_ID`
    - `MAILBOXES`（JSON 数组，格式见下文）
    - `ADMIN_TOKEN`
+   - `SETTINGS_KEY`（32 字节随机密钥，用于加密网页设置；运行 `openssl rand -hex 32`）
 
    > 务必把所有占位值替换成真实值，尤其是 `MAILBOXES` 里的邮箱和应用密码。
 4. 点击 **Deploy**。Cloudflare 会自动创建 KV namespace、更新绑定并部署 Worker。
 5. 打开 `https://<你的-worker>.workers.dev/health`，确认 `configured: true`。
-6. 打开 Worker 根地址，输入 `ADMIN_TOKEN` 进入控制台，查看状态或手动运行。
+6. 打开 Worker 根地址，输入 `ADMIN_TOKEN` 进入控制台，查看状态或手动运行；点击「设置」可以在网页里修改所有配置。
 7. 可选：在 Cloudflare Dashboard → Worker → **Settings → Variables and Secrets** 中添加 `TELEGRAM_JUNK_CHAT_ID`，用于垃圾邮件分流。
 
 说明：
@@ -184,7 +186,10 @@ npx wrangler secret put MAILBOXES
 ```bash
 npx wrangler secret put TELEGRAM_BOT_TOKEN
 npx wrangler secret put ADMIN_TOKEN
+npx wrangler secret put SETTINGS_KEY
 ```
+
+`SETTINGS_KEY` 用 `openssl rand -hex 32` 生成。它只用于加密网页设置；设置后可以在控制台里修改邮箱、Telegram 和通用参数，不需要再动 Cloudflare secrets。
 
 `TELEGRAM_CHAT_ID` 可以直接编辑 `wrangler.toml` 的 `[vars]`，也可以作为 secret 写入：
 
@@ -201,7 +206,7 @@ https://api.telegram.org/bot<你的BOT_TOKEN>/getUpdates
 
 在返回的 JSON 中找到 `message.chat.id`。群组 ID 通常是负数。
 
-`ADMIN_TOKEN` 用于保护 `/status`、`/run`、`/telegram/test`，建议用 32 位以上随机字符串。未设置时这些端点会返回 503。
+`ADMIN_TOKEN` 用于保护 `/status`、`/run`、`/telegram/test` 和控制台，建议用 32 位以上随机字符串。未设置时这些端点会返回 503。
 
 ### 5. 部署
 
@@ -215,7 +220,7 @@ npm run deploy
 curl https://<你的-worker>.workers.dev/health
 ```
 
-返回 `configured: true` 表示基础配置完整。浏览器打开 Worker 根地址并输入 `ADMIN_TOKEN`，可以在控制台里查看状态和执行操作。
+返回 `configured: true` 表示基础配置完整。浏览器打开 Worker 根地址并输入 `ADMIN_TOKEN`，可以在控制台里查看状态、执行操作，并在「设置」页修改所有配置。
 
 手动触发一次并查看结果：
 
@@ -252,7 +257,9 @@ crons = ["*/5 * * * *"]
 
 ## 配置项
 
-在 `wrangler.toml` 的 `[vars]` 或 Wrangler secrets 中设置。
+在 `wrangler.toml` 的 `[vars]`、Wrangler secrets 或控制台的「设置」页中设置。
+
+除 `ADMIN_TOKEN` 和 `SETTINGS_KEY` 外，其余配置都可以在控制台里修改。保存后配置会加密写入 KV，并优先于环境变量。
 
 | 名称 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -260,7 +267,8 @@ crons = ["*/5 * * * *"]
 | `TELEGRAM_CHAT_ID` | 无 | 普通邮件转发目标 |
 | `TELEGRAM_JUNK_CHAT_ID` | 空 | 垃圾邮件转发目标；为空则跳过垃圾邮件 |
 | `MAILBOXES` | 无 | **secret**，邮箱 JSON 数组 |
-| `ADMIN_TOKEN` | 空 | **secret**，管理端点 Bearer token；为空时禁用管理端点 |
+| `ADMIN_TOKEN` | 空 | **secret**，控制台和管理接口的 Bearer token；为空时禁用管理接口；只能在 Cloudflare 修改 |
+| `SETTINGS_KEY` | 空 | **secret**，网页设置的 AES-GCM 加密主密钥（32 字节）；只能在 Cloudflare 修改 |
 | `LANGUAGE` | `Chinese` | `Chinese` 或 `English` |
 | `TIMEZONE` | `Asia/Shanghai` | 邮件日期显示的 IANA 时区 |
 | `MAX_EMAIL_CHARS` | `3000` | 正文最多保留字符数（100–20000） |
@@ -278,6 +286,7 @@ crons = ["*/5 * * * *"]
 | GET | `/health` | 无 | 健康检查，不泄露邮箱和密钥 |
 | GET | `/`、`/dashboard` | 页面公开，数据需 Bearer | 可视化管理控制台 |
 | GET | `/status` | Bearer | 查看每个邮箱最近运行状态、游标和错误 |
+| GET/PUT/DELETE | `/api/settings` | Bearer | 读取、保存、恢复网页设置（GET 只返回脱敏信息） |
 | POST | `/run` | Bearer | 立即轮询；可加 `?mailbox=you@gmail.com` 只跑一个账号 |
 | POST | `/telegram/test` | Bearer | 发送测试消息 |
 
@@ -294,11 +303,38 @@ Authorization: Bearer <ADMIN_TOKEN>
 - 查看每个邮箱、每个文件夹的 UID、UIDVALIDITY 和最近转发时间
 - 查看最近运行时间、配置和错误信息
 - 一键执行「刷新状态」「立即运行」「发送测试消息」
+- 「设置」页可以增删邮箱、修改 Telegram、语言/时区/同步策略/限制/DRY_RUN
 - Token 只保存在当前标签页的 `sessionStorage`，关闭页面后自动清除
 - 未登录时页面不会加载任何邮箱数据；所有数据接口仍然要求 Bearer token
 - 页面带 CSP、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer` 等安全响应头
 
 ![控制台](docs/dashboard.png)
+
+### 网页设置
+
+首次使用网页设置前，需要一次性在 Cloudflare 添加主密钥：
+
+1. 生成 32 字节随机密钥：
+
+   ```bash
+   openssl rand -hex 32
+   ```
+
+2. 打开 Cloudflare Dashboard → Worker (`mail2telegram-bot`) → **Settings → Variables and Secrets**
+3. 添加 **Secret**，名称 `SETTINGS_KEY`，值为上一步生成的 64 位十六进制字符串
+4. 刷新控制台，进入「设置」，修改后点击「保存设置」
+
+![设置页](docs/settings.png)
+
+说明：
+
+- 配置使用 **AES-GCM** 加密后存到 KV；KV 里不会出现邮箱密码或 Bot Token 明文
+- `GET /api/settings` 只返回“是否已配置”，不会回显已保存的密码或 Token
+- 邮箱密码和 Bot Token 输入框留空表示保持原值；新增邮箱必须填写密码
+- 保存后立即生效，不需要重新部署
+- KV 配置优先于 Cloudflare 环境变量；点击「恢复环境变量配置」会删除 KV 配置，回退到环境变量
+- 修改 `SETTINGS_KEY` 会导致旧配置无法解密；请先正确恢复，或用新的密钥重新保存
+- `ADMIN_TOKEN` 和 `SETTINGS_KEY` 仍然只能在 Cloudflare 修改，避免网页误操作把自己锁在外面
 
 ## 行为说明
 
@@ -372,9 +408,10 @@ npm run deploy -- --dry-run
 - IMAP 只允许隐式 TLS（默认 993），不支持明文连接。
 - 配置中的 IMAP host 会在建立连接前校验，拒绝 localhost、环回、私有、链路本地、保留地址和保留域名；连接建立后还会检查远端 IP。
 - Telegram 请求固定为 `https://api.telegram.org`，并禁止重定向。
-- 密码、Bot Token 只通过 Wrangler secrets 保存，不写入日志；错误信息会过滤 Token。
+- 密码、Bot Token 只通过 Wrangler secrets 或加密后的 KV 配置保存，不写入日志；错误信息会过滤 Token。
+- 网页设置使用 AES-GCM 加密后存入 KV，主密钥 `SETTINGS_KEY` 只保存在 Worker secret 中；设置接口不会回显密码或 Token。
 - Telegram 消息内容统一做 HTML 转义，邮件内容无法注入 Telegram 标记。
-- `/status`、`/run`、`/telegram/test` 需要 `ADMIN_TOKEN`。
+- `/status`、`/run`、`/telegram/test`、`/api/settings` 需要 `ADMIN_TOKEN`。
 
 ## 常见问题
 

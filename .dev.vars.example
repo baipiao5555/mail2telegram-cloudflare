@@ -7,4 +7,7 @@
 TELEGRAM_BOT_TOKEN=123456789:AAExampleTokenReplaceMe
 TELEGRAM_CHAT_ID=123456789
 ADMIN_TOKEN=replace-with-a-long-random-token
+# 32 bytes, used to encrypt the dashboard settings in KV.
+# Generate with: openssl rand -hex 32
+SETTINGS_KEY=replace-with-64-hex-characters
 MAILBOXES=[{"email":"you@gmail.com","password":"app-password","host":"imap.gmail.com","port":993}]

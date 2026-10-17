@@ -172,6 +172,64 @@ code{
   color:#fecdd3;font-size:12.5px;
   overflow-wrap:anywhere;white-space:pre-wrap;
 }
+.banner.error{
+  border-color:rgba(251,113,133,.25);
+  background:rgba(251,113,133,.08);
+  color:#fecdd3;
+}
+.settings-panel{padding:22px}
+.settings-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.settings-head h2{margin:0 0 4px;font-size:20px}
+.settings-actions{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start}
+.settings-actions .btn{flex:0 0 auto}
+.form-section{border-top:1px solid var(--border);padding-top:20px;margin-top:20px}
+.form-section:first-of-type{border-top:0;padding-top:0;margin-top:0}
+.form-section h3{margin:0 0 12px;font-size:15px}
+.section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.section-head h3{margin:0}
+.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>span{font-size:12px;color:var(--muted);font-weight:600}
+.field input,.field select{
+  width:100%;min-width:0;
+  background:rgba(2,6,23,.65);
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:10px 12px;
+  color:var(--text);
+  font:inherit;font-size:13.5px;
+  outline:none;
+  transition:border-color .15s,box-shadow .15s;
+}
+.field input:focus,.field select:focus{
+  border-color:rgba(56,189,248,.6);
+  box-shadow:0 0 0 3px rgba(56,189,248,.12);
+}
+.field .hint{font-size:11.5px;color:var(--faint)}
+.checkbox-field{flex-direction:row;align-items:center;gap:8px;padding-top:22px}
+.checkbox-field input{width:16px;height:16px;accent-color:var(--accent);padding:0}
+.mailbox-card{
+  border:1px solid var(--border);
+  border-radius:14px;
+  padding:16px;
+  margin-bottom:12px;
+  background:rgba(2,6,23,.35);
+}
+.mailbox-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}
+.mailbox-head strong{font-size:13.5px}
+.settings-footer{
+  display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;
+  border-top:1px solid var(--border);margin-top:22px;padding-top:18px;
+}
+.settings-note{color:var(--faint);font-size:12px;margin:14px 0 0}
+.settings-source{color:var(--faint);font-size:12px;margin-top:4px}
+@media (max-width:640px){
+  .form-grid{grid-template-columns:1fr}
+  .settings-head{align-items:stretch}
+  .settings-actions{width:100%}
+  .settings-actions .btn{flex:1 1 auto}
+  .settings-footer .btn{flex:1 1 auto}
+}
 .footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:30px;color:var(--faint);font-size:12px}
 .footer a{color:var(--muted);text-decoration:none}
 .footer a:hover{color:var(--accent)}
@@ -246,10 +304,34 @@ code{
       <button id="refreshBtn" class="btn ghost" type="button">刷新状态</button>
       <button id="runBtn" class="btn primary" type="button">立即运行</button>
       <button id="testBtn" class="btn" type="button">发送测试消息</button>
+      <button id="settingsBtn" class="btn ghost" type="button">设置</button>
       <button id="logoutBtn" class="btn danger-ghost" type="button">退出</button>
     </div>
     <div id="metaLine" class="meta-line"></div>
     <div id="accounts" class="accounts"></div>
+  </section>
+
+  <section id="settingsView" class="hidden">
+    <div id="settingsBanner" class="banner hidden" role="status"></div>
+    <div class="panel settings-panel">
+      <div class="settings-head">
+        <div>
+          <h2>设置</h2>
+          <p class="muted small">保存后写入 KV 并立即生效，不需要重新部署。</p>
+          <p id="settingsSource" class="settings-source"></p>
+        </div>
+        <div class="settings-actions">
+          <button id="settingsBackBtn" class="btn ghost" type="button">返回控制台</button>
+          <button id="saveSettingsBtn" class="btn primary" type="button">保存设置</button>
+        </div>
+      </div>
+      <div id="settingsForm"><div class="empty">正在读取设置…</div></div>
+      <div class="settings-footer">
+        <button id="resetSettingsBtn" class="btn danger-ghost" type="button">恢复环境变量配置</button>
+        <button id="settingsBackBtn2" class="btn ghost" type="button">返回控制台</button>
+      </div>
+      <p class="settings-note">ADMIN_TOKEN 和 SETTINGS_KEY 只能在 Cloudflare 修改。已保存的密码不会回显，留空表示保持不变。</p>
+    </div>
   </section>
 
   <footer class="footer">
@@ -270,6 +352,8 @@ code{
     token: sessionStorage.getItem(TOKEN_KEY) || '',
     health: null,
     status: null,
+    settings: null,
+    view: 'login',
     busy: false
   };
   var toastTimer = null;
@@ -316,6 +400,8 @@ code{
   }
 
   function showLogin(message) {
+    state.view = 'login';
+    $('settingsView').classList.add('hidden');
     $('dashboard').classList.add('hidden');
     $('loginPanel').classList.remove('hidden');
     $('loginError').textContent = message || '';
@@ -332,8 +418,17 @@ code{
   }
 
   function showDashboard() {
+    state.view = 'dashboard';
+    $('settingsView').classList.add('hidden');
     $('loginPanel').classList.add('hidden');
     $('dashboard').classList.remove('hidden');
+  }
+
+  function showSettingsView() {
+    state.view = 'settings';
+    $('loginPanel').classList.add('hidden');
+    $('dashboard').classList.add('hidden');
+    $('settingsView').classList.remove('hidden');
   }
 
   function setBusy(busy) {
@@ -341,6 +436,7 @@ code{
     $('refreshBtn').disabled = busy;
     $('runBtn').disabled = busy;
     $('testBtn').disabled = busy;
+    $('settingsBtn').disabled = busy;
   }
 
   async function api(path, options) {
@@ -352,6 +448,7 @@ code{
     var response = await fetch(path, {
       method: opts.method || 'GET',
       headers: headers,
+      body: opts.body,
       cache: 'no-store'
     });
     var data = null;
@@ -397,7 +494,9 @@ code{
       var data = await api('/status');
       state.status = data;
       renderStatus(data);
-      showDashboard();
+      if (state.view !== 'settings') {
+        showDashboard();
+      }
       setChip('已连接', 'ok');
       if (state.health && state.health.configured === false) {
         $('configBanner').textContent = '云端配置不完整：/health 返回 configured=false。请检查 MAILBOXES、TELEGRAM_BOT_TOKEN、TELEGRAM_CHAT_ID。';
@@ -541,6 +640,270 @@ code{
     }
   }
 
+  function mailboxEditorHtml(mailbox, index) {
+    var folders = mailbox.folders && mailbox.folders.length ? mailbox.folders.join(', ') : '';
+    var passwordPlaceholder = mailbox.passwordConfigured ? '已设置，留空保持不变' : '必填';
+    return '<div class="mailbox-card">' +
+      '<div class="mailbox-head"><strong class="mailbox-title">邮箱 ' + (index + 1) + '</strong>' +
+        '<button class="btn danger-ghost remove-mailbox" type="button">删除</button></div>' +
+      '<div class="form-grid">' +
+        '<label class="field"><span>邮箱地址</span><input data-field="email" type="text" value="' + esc(mailbox.email || '') + '" placeholder="you@gmail.com"></label>' +
+        '<label class="field"><span>应用密码 / 授权码</span><input data-field="password" type="password" value="" placeholder="' + esc(passwordPlaceholder) + '" autocomplete="new-password"></label>' +
+        '<label class="field"><span>IMAP 服务器</span><input data-field="host" type="text" value="' + esc(mailbox.host || 'imap.gmail.com') + '"></label>' +
+        '<label class="field"><span>端口</span><input data-field="port" type="number" value="' + (mailbox.port || 993) + '"></label>' +
+        '<label class="field"><span>文件夹（逗号分隔，可留空自动发现）</span><input data-field="folders" type="text" value="' + esc(folders) + '" placeholder="INBOX, Junk"></label>' +
+        '<label class="field"><span>显示名称（可选）</span><input data-field="name" type="text" value="' + esc(mailbox.name || '') + '"></label>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderSettings(data) {
+    var keyOk = data.settingsKeyConfigured === true;
+    var messages = [];
+    if (!keyOk) {
+      messages.push('SETTINGS_KEY 未配置或无效。请在 Cloudflare Worker 的 Variables and Secrets 添加 32 字节随机密钥（openssl rand -hex 32），然后刷新本页。');
+      if (data.hasStoredSettings) {
+        messages.push('检测到已保存的加密配置，但当前 SETTINGS_KEY 无法解密。');
+      }
+    }
+    if (data.settingsError) messages.push('已保存配置无法解密：' + data.settingsError);
+    if (data.envError) messages.push('环境变量配置读取失败：' + data.envError);
+
+    var banner = $('settingsBanner');
+    if (messages.length) {
+      banner.innerHTML = messages.map(esc).join('<br>');
+      banner.classList.remove('hidden');
+      if (data.settingsError || (!keyOk && data.hasStoredSettings)) {
+        banner.classList.add('error');
+      } else {
+        banner.classList.remove('error');
+      }
+    } else {
+      banner.classList.add('hidden');
+      banner.classList.remove('error');
+    }
+
+    var sourceText = data.source === 'kv'
+      ? 'KV（网页设置）'
+      : data.source === 'env'
+        ? 'Cloudflare 环境变量'
+        : '默认值';
+    $('settingsSource').textContent = '当前配置来源：' + sourceText;
+
+    var telegram = data.telegram || {};
+    var general = data.general || {};
+    var mailboxes = data.mailboxes || [];
+    var mailboxHtml = mailboxes.map(mailboxEditorHtml).join('');
+    if (!mailboxes.length) {
+      mailboxHtml = '<div class="empty">还没有邮箱账号，点击「添加邮箱」开始。</div>';
+    }
+
+    var languageOptions =
+      '<option value="Chinese"' + (general.language === 'Chinese' ? ' selected' : '') + '>中文</option>' +
+      '<option value="English"' + (general.language === 'English' ? ' selected' : '') + '>English</option>';
+    var syncOptions =
+      '<option value="skip"' + (general.initialSync === 'skip' ? ' selected' : '') + '>skip（跳过历史邮件）</option>' +
+      '<option value="latest"' + (general.initialSync === 'latest' ? ' selected' : '') + '>latest（只发最新一封）</option>';
+
+    $('settingsForm').innerHTML =
+      '<section class="form-section">' +
+        '<h3>Telegram</h3>' +
+        '<div class="form-grid">' +
+          '<label class="field"><span>Bot Token</span><input id="setTelegramToken" type="password" value="" placeholder="' + (telegram.tokenConfigured ? '已设置，留空保持不变' : '粘贴 Bot Token') + '" autocomplete="new-password"></label>' +
+          '<label class="field"><span>普通邮件 Chat ID</span><input id="setChatId" type="text" value="' + esc(telegram.chatId || '') + '" placeholder="-1001234567890"></label>' +
+          '<label class="field"><span>垃圾邮件 Chat ID（可选）</span><input id="setJunkChatId" type="text" value="' + esc(telegram.junkChatId || '') + '" placeholder="留空则不转发垃圾邮件"></label>' +
+        '</div>' +
+      '</section>' +
+      '<section class="form-section">' +
+        '<div class="section-head"><h3>邮箱账号</h3><button id="addMailboxBtn" class="btn ghost" type="button">添加邮箱</button></div>' +
+        '<div id="mailboxList">' + mailboxHtml + '</div>' +
+      '</section>' +
+      '<section class="form-section">' +
+        '<h3>通用设置</h3>' +
+        '<div class="form-grid">' +
+          '<label class="field"><span>语言</span><select id="setLanguage">' + languageOptions + '</select></label>' +
+          '<label class="field"><span>时区（IANA）</span><input id="setTimeZone" type="text" value="' + esc(general.timeZone || 'Asia/Shanghai') + '" placeholder="Asia/Shanghai"></label>' +
+          '<label class="field"><span>首次运行</span><select id="setInitialSync">' + syncOptions + '</select></label>' +
+          '<label class="field"><span>正文最大字符数</span><input id="setMaxEmailChars" type="number" min="100" max="20000" value="' + (general.maxEmailChars || 3000) + '"></label>' +
+          '<label class="field"><span>单封邮件最大字节数</span><input id="setMaxEmailBytes" type="number" min="1024" max="26214400" value="' + (general.maxEmailBytes || 10485760) + '"></label>' +
+          '<label class="field"><span>每文件夹每轮最多处理</span><input id="setMaxMessagesPerRun" type="number" min="1" max="200" value="' + (general.maxMessagesPerRun || 20) + '"></label>' +
+          '<label class="checkbox-field field"><input id="setLoginNotify" type="checkbox"' + (general.loginNotify ? ' checked' : '') + '><span>首次登录时发送 Telegram 通知</span></label>' +
+          '<label class="checkbox-field field"><input id="setDedupe" type="checkbox"' + (general.dedupe ? ' checked' : '') + '><span>按 Message-ID 去重</span></label>' +
+          '<label class="checkbox-field field"><input id="setDryRun" type="checkbox"' + (general.dryRun ? ' checked' : '') + '><span>DRY RUN（只记录，不发送 Telegram）</span></label>' +
+        '</div>' +
+      '</section>';
+    $('saveSettingsBtn').disabled = !keyOk;
+  }
+
+  async function openSettings() {
+    if (!state.token) {
+      showLogin('');
+      return;
+    }
+    showSettingsView();
+    $('settingsBanner').classList.add('hidden');
+    $('settingsForm').innerHTML = '<div class="empty">正在读取设置…</div>';
+    try {
+      var data = await api('/api/settings');
+      state.settings = data;
+      renderSettings(data);
+    } catch (error) {
+      if (error.status === 401) {
+        state.token = '';
+        sessionStorage.removeItem(TOKEN_KEY);
+        showLogin('ADMIN_TOKEN 无效，请重新输入。');
+      } else if (error.status === 503) {
+        showLogin('Worker 尚未配置 ADMIN_TOKEN，管理接口已禁用。');
+      } else {
+        $('settingsBanner').textContent = '读取设置失败：' + error.message;
+        $('settingsBanner').classList.add('error');
+        $('settingsBanner').classList.remove('hidden');
+        $('settingsForm').innerHTML = '<div class="empty">无法读取设置。</div>';
+      }
+    }
+  }
+
+  function collectSettings() {
+    var cards = Array.prototype.slice.call(document.querySelectorAll('.mailbox-card'));
+    var mailboxes = cards.map(function (card) {
+      function value(field) {
+        var input = card.querySelector('[data-field="' + field + '"]');
+        return input ? input.value : '';
+      }
+      var folders = value('folders').split(/[,，]/).map(function (item) {
+        return item.trim();
+      }).filter(function (item) {
+        return item !== '';
+      });
+      return {
+        email: value('email').trim(),
+        password: value('password'),
+        host: value('host').trim(),
+        port: Number(value('port')),
+        folders: folders,
+        name: value('name').trim()
+      };
+    });
+
+    return {
+      telegram: {
+        token: $('setTelegramToken').value.trim(),
+        chatId: $('setChatId').value.trim(),
+        junkChatId: $('setJunkChatId').value.trim()
+      },
+      general: {
+        language: $('setLanguage').value,
+        timeZone: $('setTimeZone').value.trim(),
+        maxEmailChars: Number($('setMaxEmailChars').value),
+        maxEmailBytes: Number($('setMaxEmailBytes').value),
+        maxMessagesPerRun: Number($('setMaxMessagesPerRun').value),
+        initialSync: $('setInitialSync').value,
+        loginNotify: $('setLoginNotify').checked,
+        dedupe: $('setDedupe').checked,
+        dryRun: $('setDryRun').checked
+      },
+      mailboxes: mailboxes
+    };
+  }
+
+  async function saveSettings() {
+    if (state.busy) return;
+    if (!state.settings || state.settings.settingsKeyConfigured !== true) {
+      toast('SETTINGS_KEY 未配置，无法保存设置。', 'error');
+      return;
+    }
+    var button = $('saveSettingsBtn');
+    var previousText = button.textContent;
+    setBusy(true);
+    button.disabled = true;
+    button.textContent = '保存中…';
+    try {
+      await api('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectSettings())
+      });
+      toast('设置已保存，立即生效。', 'ok');
+      await loadStatus(true);
+      var data = await api('/api/settings');
+      state.settings = data;
+      renderSettings(data);
+    } catch (error) {
+      if (error.status === 401) {
+        state.token = '';
+        sessionStorage.removeItem(TOKEN_KEY);
+        showLogin('ADMIN_TOKEN 无效，请重新输入。');
+      } else {
+        $('settingsBanner').textContent = '保存失败：' + error.message;
+        $('settingsBanner').classList.add('error');
+        $('settingsBanner').classList.remove('hidden');
+        toast('保存失败：' + error.message, 'error');
+      }
+    } finally {
+      setBusy(false);
+      button.disabled = !(state.settings && state.settings.settingsKeyConfigured === true);
+      button.textContent = previousText;
+    }
+  }
+
+  async function resetSettings() {
+    if (state.busy) return;
+    if (!window.confirm('确定删除 KV 中的网页设置，恢复为 Cloudflare 环境变量配置吗？')) {
+      return;
+    }
+    setBusy(true);
+    try {
+      await api('/api/settings', { method: 'DELETE' });
+      toast('已恢复环境变量配置。', 'ok');
+      await loadStatus(true);
+      var data = await api('/api/settings');
+      state.settings = data;
+      renderSettings(data);
+    } catch (error) {
+      if (error.status === 401) {
+        state.token = '';
+        sessionStorage.removeItem(TOKEN_KEY);
+        showLogin('ADMIN_TOKEN 无效，请重新输入。');
+      } else {
+        $('settingsBanner').textContent = '恢复失败：' + error.message;
+        $('settingsBanner').classList.add('error');
+        $('settingsBanner').classList.remove('hidden');
+        toast('恢复失败：' + error.message, 'error');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function renumberMailboxes() {
+    var cards = document.querySelectorAll('.mailbox-card');
+    Array.prototype.forEach.call(cards, function (card, index) {
+      var title = card.querySelector('.mailbox-title');
+      if (title) title.textContent = '邮箱 ' + (index + 1);
+    });
+  }
+
+  function addMailbox() {
+    var list = $('mailboxList');
+    if (!list) return;
+    var empty = list.querySelector('.empty');
+    if (empty) list.innerHTML = '';
+    var index = list.querySelectorAll('.mailbox-card').length;
+    list.insertAdjacentHTML('beforeend', mailboxEditorHtml({
+      email: '',
+      host: 'imap.gmail.com',
+      port: 993,
+      folders: [],
+      passwordConfigured: false
+    }, index));
+    renumberMailboxes();
+  }
+
+  function backToDashboard() {
+    showDashboard();
+    loadStatus(true);
+  }
+
   $('loginForm').addEventListener('submit', function (event) {
     event.preventDefault();
     var input = $('tokenInput');
@@ -561,6 +924,28 @@ code{
 
   $('runBtn').addEventListener('click', runNow);
   $('testBtn').addEventListener('click', sendTest);
+  $('settingsBtn').addEventListener('click', openSettings);
+  $('settingsBackBtn').addEventListener('click', backToDashboard);
+  $('settingsBackBtn2').addEventListener('click', backToDashboard);
+  $('saveSettingsBtn').addEventListener('click', saveSettings);
+  $('resetSettingsBtn').addEventListener('click', resetSettings);
+
+  $('settingsForm').addEventListener('click', function (event) {
+    var target = event.target;
+    if (!target || !target.closest) return;
+    if (target.closest('#addMailboxBtn')) {
+      addMailbox();
+      return;
+    }
+    var remove = target.closest('.remove-mailbox');
+    if (remove) {
+      var card = remove.closest('.mailbox-card');
+      if (card && card.parentNode) {
+        card.parentNode.removeChild(card);
+        renumberMailboxes();
+      }
+    }
+  });
 
   $('logoutBtn').addEventListener('click', function () {
     state.token = '';

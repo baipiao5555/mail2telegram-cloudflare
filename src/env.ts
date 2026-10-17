@@ -1,10 +1,6 @@
 import { assertSafeHost } from './security';
-import {
-  isValidTimeZone,
-  parseIntEnv,
-  parseBoolEnv,
-  errorMessage,
-} from './util';
+import { loadStoredSettings } from './settings';
+import { isValidTimeZone, parseIntEnv, parseBoolEnv } from './util';
 
 export interface Env {
   MAIL2TG_KV: KVNamespace;
@@ -13,6 +9,7 @@ export interface Env {
   TELEGRAM_JUNK_CHAT_ID?: string;
   MAILBOXES?: string;
   ADMIN_TOKEN?: string;
+  SETTINGS_KEY?: string;
   LANGUAGE?: string;
   TIMEZONE?: string;
   MAX_EMAIL_CHARS?: string;
@@ -37,6 +34,31 @@ export interface Mailbox {
   name?: string;
 }
 
+export interface StoredMailbox {
+  email: string;
+  password: string;
+  host: string;
+  port: number;
+  folders?: string[];
+  name?: string;
+}
+
+export interface StoredSettings {
+  telegramToken: string;
+  chatId: string;
+  junkChatId: string;
+  language: Language;
+  timeZone: string;
+  maxEmailChars: number;
+  maxEmailBytes: number;
+  maxMessagesPerRun: number;
+  initialSync: InitialSync;
+  loginNotify: boolean;
+  dedupe: boolean;
+  dryRun: boolean;
+  mailboxes: StoredMailbox[];
+}
+
 export interface AppConfig {
   telegramToken: string;
   chatId: string;
@@ -52,6 +74,11 @@ export interface AppConfig {
   dedupe: boolean;
   dryRun: boolean;
   mailboxes: Mailbox[];
+}
+
+export interface LoadedConfig {
+  config: AppConfig;
+  source: 'env' | 'kv';
 }
 
 function readString(value: unknown, field: string): string | undefined {
@@ -83,70 +110,80 @@ function assertSingleLine(value: string, field: string): string {
   return value;
 }
 
-function normalizeMailbox(raw: unknown, index: number): Mailbox {
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new Error(`MAILBOXES[${index}] must be an object`);
-  }
-  const record = raw as Record<string, unknown>;
-
-  const email = readString(record.email ?? record.EMAIL ?? record.mailbox, `MAILBOXES[${index}].email`);
+function normalizeMailboxRecord(
+  raw: Record<string, unknown>,
+  fieldPrefix: string,
+  index: number,
+): Mailbox {
+  const email = readString(
+    raw.email ?? raw.EMAIL ?? raw.mailbox,
+    `${fieldPrefix}[${index}].email`,
+  );
   if (!email) {
-    throw new Error(`MAILBOXES[${index}].email is required`);
+    throw new Error(`${fieldPrefix}[${index}].email is required`);
   }
-  assertSingleLine(email, `MAILBOXES[${index}].email`);
+  assertSingleLine(email, `${fieldPrefix}[${index}].email`);
   if (!email.includes('@')) {
-    throw new Error(`MAILBOXES[${index}].email is not a valid email address`);
+    throw new Error(`${fieldPrefix}[${index}].email is not a valid email address`);
   }
 
-  const password = readSecretString(record.password ?? record.PASSWORD, `MAILBOXES[${index}].password`);
+  const password = readSecretString(
+    raw.password ?? raw.PASSWORD,
+    `${fieldPrefix}[${index}].password`,
+  );
   if (!password) {
-    throw new Error(`MAILBOXES[${index}].password is required`);
+    throw new Error(`${fieldPrefix}[${index}].password is required`);
   }
-  assertSingleLine(password, `MAILBOXES[${index}].password`);
+  assertSingleLine(password, `${fieldPrefix}[${index}].password`);
 
   const rawHost = readString(
-    record.host ?? record.IMAP_SERVER ?? record.imapServer ?? record.server,
-    `MAILBOXES[${index}].host`,
+    raw.host ?? raw.IMAP_SERVER ?? raw.imapServer ?? raw.server,
+    `${fieldPrefix}[${index}].host`,
   );
   if (!rawHost) {
-    throw new Error(`MAILBOXES[${index}].host is required`);
+    throw new Error(`${fieldPrefix}[${index}].host is required`);
   }
   const host = assertSafeHost(rawHost);
 
-  const rawPort = record.port ?? record.IMAP_SERVER_PORT ?? record.imapPort ?? 993;
+  const rawPort = raw.port ?? raw.IMAP_SERVER_PORT ?? raw.imapPort ?? 993;
   const port = typeof rawPort === 'number' ? rawPort : Number.parseInt(String(rawPort), 10);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(`MAILBOXES[${index}].port must be an integer between 1 and 65535`);
+    throw new Error(`${fieldPrefix}[${index}].port must be an integer between 1 and 65535`);
   }
   if (port === 25) {
     throw new Error('port 25 is blocked by the Workers runtime');
   }
 
   let folders: string[] | undefined;
-  const rawFolders = record.folders ?? record.FOLDERS;
-  if (rawFolders !== undefined) {
+  const rawFolders = raw.folders ?? raw.FOLDERS;
+  if (rawFolders !== undefined && rawFolders !== null) {
     if (!Array.isArray(rawFolders) || rawFolders.length === 0) {
-      throw new Error(`MAILBOXES[${index}].folders must be a non-empty array`);
+      throw new Error(`${fieldPrefix}[${index}].folders must be a non-empty array`);
     }
     if (rawFolders.length > 20) {
-      throw new Error(`MAILBOXES[${index}].folders has too many entries`);
+      throw new Error(`${fieldPrefix}[${index}].folders has too many entries`);
     }
     folders = rawFolders.map((folder, folderIndex) => {
       if (typeof folder !== 'string' || folder.trim() === '') {
-        throw new Error(`MAILBOXES[${index}].folders[${folderIndex}] must be a non-empty string`);
+        throw new Error(
+          `${fieldPrefix}[${index}].folders[${folderIndex}] must be a non-empty string`,
+        );
       }
-      return assertSingleLine(folder.trim(), `MAILBOXES[${index}].folders[${folderIndex}]`);
+      return assertSingleLine(
+        folder.trim(),
+        `${fieldPrefix}[${index}].folders[${folderIndex}]`,
+      );
     });
     if (new Set(folders.map((folder) => folder.toLowerCase())).size !== folders.length) {
-      throw new Error(`MAILBOXES[${index}].folders contains duplicates`);
+      throw new Error(`${fieldPrefix}[${index}].folders contains duplicates`);
     }
   }
 
-  const name = readString(record.name ?? record.NAME, `MAILBOXES[${index}].name`);
+  const name = readString(raw.name ?? raw.NAME, `${fieldPrefix}[${index}].name`);
   if (name) {
-    assertSingleLine(name, `MAILBOXES[${index}].name`);
+    assertSingleLine(name, `${fieldPrefix}[${index}].name`);
     if (name.length > 100) {
-      throw new Error(`MAILBOXES[${index}].name is too long`);
+      throw new Error(`${fieldPrefix}[${index}].name is too long`);
     }
   }
 
@@ -161,7 +198,7 @@ function normalizeMailbox(raw: unknown, index: number): Mailbox {
   };
 }
 
-function parseMailboxes(value: string | undefined): Mailbox[] {
+function parseMailboxes(value: string | undefined, fieldPrefix = 'MAILBOXES'): Mailbox[] {
   if (!value || value.trim() === '') {
     return [];
   }
@@ -169,13 +206,18 @@ function parseMailboxes(value: string | undefined): Mailbox[] {
   try {
     parsed = JSON.parse(value);
   } catch {
-    throw new Error('MAILBOXES is not valid JSON');
+    throw new Error(`${fieldPrefix} is not valid JSON`);
   }
   const list = Array.isArray(parsed) ? parsed : [parsed];
   if (list.length > 50) {
     throw new Error('too many mailboxes configured (max 50)');
   }
-  const mailboxes = list.map((entry, index) => normalizeMailbox(entry, index));
+  const mailboxes = list.map((entry, index) => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new Error(`${fieldPrefix}[${index}] must be an object`);
+    }
+    return normalizeMailboxRecord(entry as Record<string, unknown>, fieldPrefix, index);
+  });
   const seen = new Set<string>();
   for (const mailbox of mailboxes) {
     if (seen.has(mailbox.id)) {
@@ -211,48 +253,89 @@ function readToken(value: string | undefined): string {
   return token;
 }
 
-export function parseConfig(env: Env): AppConfig {
-  const dryRun = parseBoolEnv(env.DRY_RUN, false);
-
-  const languageRaw = (env.LANGUAGE?.trim() || 'Chinese').toLowerCase();
-  const language: Language =
-    languageRaw === 'english' || languageRaw === 'en' ? 'English' : 'Chinese';
-
-  const timeZone = env.TIMEZONE?.trim() || 'Asia/Shanghai';
-  if (!isValidTimeZone(timeZone)) {
-    throw new Error(`invalid TIMEZONE: ${timeZone}`);
+function requireNumber(value: unknown, field: string, min: number, max: number): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min || value > max) {
+    throw new Error(`${field} must be between ${min} and ${max}`);
   }
+  return value;
+}
 
-  const telegramToken = readToken(env.TELEGRAM_BOT_TOKEN);
+function requireBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new Error(`${field} must be a boolean`);
+  }
+  return value;
+}
+
+export function buildConfigFromStoredSettings(
+  settings: StoredSettings,
+  adminToken: string,
+): AppConfig {
+  const dryRun = requireBoolean(settings.dryRun, 'DRY_RUN');
+
+  const telegramToken = readToken(settings.telegramToken);
   if (!telegramToken && !dryRun) {
     throw new Error('TELEGRAM_BOT_TOKEN is required');
   }
-  const chatId = readChatId(env.TELEGRAM_CHAT_ID, 'TELEGRAM_CHAT_ID', !dryRun);
-  const junkChatId = readChatId(env.TELEGRAM_JUNK_CHAT_ID, 'TELEGRAM_JUNK_CHAT_ID', false);
+  const chatId = readChatId(settings.chatId, 'TELEGRAM_CHAT_ID', !dryRun);
+  const junkChatId = readChatId(settings.junkChatId, 'TELEGRAM_JUNK_CHAT_ID', false);
 
-  const adminToken = env.ADMIN_TOKEN?.trim() ?? '';
   if (adminToken && /\s/.test(adminToken)) {
     throw new Error('ADMIN_TOKEN must not contain whitespace');
   }
 
-  const maxEmailChars = parseIntEnv(env.MAX_EMAIL_CHARS, 3000);
-  if (maxEmailChars < 100 || maxEmailChars > 20000) {
-    throw new Error('MAX_EMAIL_CHARS must be between 100 and 20000');
+  const language =
+    settings.language === 'English' || settings.language === 'Chinese'
+      ? settings.language
+      : (() => {
+          throw new Error('LANGUAGE must be "Chinese" or "English"');
+        })();
+
+  const timeZone = settings.timeZone?.trim() || 'Asia/Shanghai';
+  if (!isValidTimeZone(timeZone)) {
+    throw new Error(`invalid TIMEZONE: ${timeZone}`);
   }
 
-  const maxEmailBytes = parseIntEnv(env.MAX_EMAIL_BYTES, 10 * 1024 * 1024);
-  if (maxEmailBytes < 1024 || maxEmailBytes > 25 * 1024 * 1024) {
-    throw new Error('MAX_EMAIL_BYTES must be between 1024 and 26214400');
-  }
+  const maxEmailChars = requireNumber(settings.maxEmailChars, 'MAX_EMAIL_CHARS', 100, 20000);
+  const maxEmailBytes = requireNumber(
+    settings.maxEmailBytes,
+    'MAX_EMAIL_BYTES',
+    1024,
+    25 * 1024 * 1024,
+  );
+  const maxMessagesPerRun = requireNumber(
+    settings.maxMessagesPerRun,
+    'MAX_MESSAGES_PER_RUN',
+    1,
+    200,
+  );
 
-  const maxMessagesPerRun = parseIntEnv(env.MAX_MESSAGES_PER_RUN, 20);
-  if (maxMessagesPerRun < 1 || maxMessagesPerRun > 200) {
-    throw new Error('MAX_MESSAGES_PER_RUN must be between 1 and 200');
-  }
+  const initialSync =
+    settings.initialSync === 'skip' || settings.initialSync === 'latest'
+      ? settings.initialSync
+      : (() => {
+          throw new Error('INITIAL_SYNC must be "skip" or "latest"');
+        })();
 
-  const initialSyncRaw = (env.INITIAL_SYNC?.trim() || 'skip').toLowerCase();
-  if (initialSyncRaw !== 'skip' && initialSyncRaw !== 'latest') {
-    throw new Error('INITIAL_SYNC must be "skip" or "latest"');
+  const mailboxes = settings.mailboxes.map((mailbox, index) => {
+    if (typeof mailbox !== 'object' || mailbox === null || Array.isArray(mailbox)) {
+      throw new Error(`mailboxes[${index}] must be an object`);
+    }
+    return normalizeMailboxRecord(
+      mailbox as unknown as Record<string, unknown>,
+      'mailboxes',
+      index,
+    );
+  });
+  if (mailboxes.length > 50) {
+    throw new Error('too many mailboxes configured (max 50)');
+  }
+  const seen = new Set<string>();
+  for (const mailbox of mailboxes) {
+    if (seen.has(mailbox.id)) {
+      throw new Error(`duplicate mailbox email: ${mailbox.email}`);
+    }
+    seen.add(mailbox.id);
   }
 
   return {
@@ -265,20 +348,96 @@ export function parseConfig(env: Env): AppConfig {
     maxEmailChars,
     maxEmailBytes,
     maxMessagesPerRun,
-    initialSync: initialSyncRaw,
-    loginNotify: parseBoolEnv(env.LOGIN_NOTIFY, true),
-    dedupe: parseBoolEnv(env.DEDUPE, true),
+    initialSync,
+    loginNotify: requireBoolean(settings.loginNotify, 'LOGIN_NOTIFY'),
+    dedupe: requireBoolean(settings.dedupe, 'DEDUPE'),
     dryRun,
-    mailboxes: parseMailboxes(env.MAILBOXES),
+    mailboxes,
   };
 }
 
-/** Config problems for /health, without leaking secret values. */
+export function defaultStoredSettings(): StoredSettings {
+  return {
+    telegramToken: '',
+    chatId: '',
+    junkChatId: '',
+    language: 'Chinese',
+    timeZone: 'Asia/Shanghai',
+    maxEmailChars: 3000,
+    maxEmailBytes: 10 * 1024 * 1024,
+    maxMessagesPerRun: 20,
+    initialSync: 'skip',
+    loginNotify: true,
+    dedupe: true,
+    dryRun: false,
+    mailboxes: [],
+  };
+}
+
+export function storedMailboxFromMailbox(mailbox: Mailbox): StoredMailbox {
+  return {
+    email: mailbox.email,
+    password: mailbox.password,
+    host: mailbox.host,
+    port: mailbox.port,
+    ...(mailbox.folders ? { folders: mailbox.folders } : {}),
+    ...(mailbox.name ? { name: mailbox.name } : {}),
+  };
+}
+
+export function settingsFromEnv(env: Env): StoredSettings {
+  const languageRaw = (env.LANGUAGE?.trim() || 'Chinese').toLowerCase();
+  const language: Language =
+    languageRaw === 'english' || languageRaw === 'en' ? 'English' : 'Chinese';
+
+  const initialSyncRaw = (env.INITIAL_SYNC?.trim() || 'skip').toLowerCase();
+  if (initialSyncRaw !== 'skip' && initialSyncRaw !== 'latest') {
+    throw new Error('INITIAL_SYNC must be "skip" or "latest"');
+  }
+
+  return {
+    telegramToken: readToken(env.TELEGRAM_BOT_TOKEN) ?? '',
+    chatId: env.TELEGRAM_CHAT_ID?.trim() ?? '',
+    junkChatId: env.TELEGRAM_JUNK_CHAT_ID?.trim() ?? '',
+    language,
+    timeZone: env.TIMEZONE?.trim() || 'Asia/Shanghai',
+    maxEmailChars: parseIntEnv(env.MAX_EMAIL_CHARS, 3000),
+    maxEmailBytes: parseIntEnv(env.MAX_EMAIL_BYTES, 10 * 1024 * 1024),
+    maxMessagesPerRun: parseIntEnv(env.MAX_MESSAGES_PER_RUN, 20),
+    initialSync: initialSyncRaw,
+    loginNotify: parseBoolEnv(env.LOGIN_NOTIFY, true),
+    dedupe: parseBoolEnv(env.DEDUPE, true),
+    dryRun: parseBoolEnv(env.DRY_RUN, false),
+    mailboxes: parseMailboxes(env.MAILBOXES).map(storedMailboxFromMailbox),
+  };
+}
+
+export function parseConfig(env: Env): AppConfig {
+  return buildConfigFromStoredSettings(
+    settingsFromEnv(env),
+    env.ADMIN_TOKEN?.trim() ?? '',
+  );
+}
+
+export async function loadConfig(env: Env): Promise<LoadedConfig> {
+  if (env.SETTINGS_KEY) {
+    const stored = await loadStoredSettings(env);
+    if (stored) {
+      return {
+        config: buildConfigFromStoredSettings(stored, env.ADMIN_TOKEN?.trim() ?? ''),
+        source: 'kv',
+      };
+    }
+  }
+  return { config: parseConfig(env), source: 'env' };
+}
+
+/** Config problems for health checks, without leaking secret values. */
 export function describeConfigError(env: Env): string | null {
   try {
     parseConfig(env);
     return null;
   } catch (error) {
-    return errorMessage(error);
+    return error instanceof Error ? error.message : String(error);
   }
 }

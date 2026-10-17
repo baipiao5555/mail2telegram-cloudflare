@@ -1,5 +1,21 @@
-import { describeConfigError, parseConfig, type Env } from './env';
+import {
+  buildConfigFromStoredSettings,
+  defaultStoredSettings,
+  loadConfig,
+  settingsFromEnv,
+  type Env,
+  type StoredSettings,
+} from './env';
 import { pollAll } from './poll';
+import {
+  deleteStoredSettings,
+  hasStoredSettings,
+  loadStoredSettings,
+  maskSettings,
+  mergeSubmittedSettings,
+  saveStoredSettings,
+  settingsKeyConfigured,
+} from './settings';
 import { StateStore } from './state';
 import { makeSenderOptions, sendTestMessage, telegramErrorForLog } from './telegram';
 import { renderDashboardHtml } from './ui';
@@ -74,13 +90,14 @@ async function handleStatus(env: Env): Promise<Response> {
   if (!env.MAIL2TG_KV) {
     return json({ error: 'MAIL2TG_KV binding is missing' }, 500);
   }
-  let config;
+  let loaded;
   try {
-    config = parseConfig(env);
+    loaded = await loadConfig(env);
   } catch (error) {
     return json({ error: safeError(error, env.TELEGRAM_BOT_TOKEN ?? '') }, 500);
   }
 
+  const config = loaded.config;
   const store = new StateStore(env.MAIL2TG_KV);
   const mailboxes = [];
   for (const mailbox of config.mailboxes) {
@@ -99,6 +116,7 @@ async function handleStatus(env: Env): Promise<Response> {
     timeZone: config.timeZone,
     initialSync: config.initialSync,
     dryRun: config.dryRun,
+    configSource: loaded.source,
     mailboxes,
   });
 }
@@ -106,7 +124,7 @@ async function handleStatus(env: Env): Promise<Response> {
 async function handleRun(request: Request, env: Env): Promise<Response> {
   let config;
   try {
-    config = parseConfig(env);
+    config = (await loadConfig(env)).config;
   } catch (error) {
     return json({ error: safeError(error, env.TELEGRAM_BOT_TOKEN ?? '') }, 500);
   }
@@ -136,7 +154,7 @@ async function handleRun(request: Request, env: Env): Promise<Response> {
 async function handleTelegramTest(env: Env): Promise<Response> {
   let config;
   try {
-    config = parseConfig(env);
+    config = (await loadConfig(env)).config;
   } catch (error) {
     return json({ error: safeError(error, env.TELEGRAM_BOT_TOKEN ?? '') }, 500);
   }
@@ -153,6 +171,117 @@ async function handleTelegramTest(env: Env): Promise<Response> {
   }
 }
 
+async function handleGetSettings(env: Env): Promise<Response> {
+  if (!env.MAIL2TG_KV) {
+    return json({ error: 'MAIL2TG_KV binding is missing' }, 500);
+  }
+
+  const keyConfigured = settingsKeyConfigured(env);
+  const storedPresent = await hasStoredSettings(env);
+  let settings: StoredSettings | null = null;
+  let source: 'kv' | 'env' | 'none' = 'none';
+  let envError: string | undefined;
+  let settingsError: string | undefined;
+
+  if (keyConfigured) {
+    try {
+      settings = await loadStoredSettings(env);
+    } catch (error) {
+      settingsError = errorMessage(error);
+    }
+  }
+
+  if (settings) {
+    source = 'kv';
+  } else {
+    try {
+      settings = settingsFromEnv(env);
+      source = 'env';
+    } catch (error) {
+      envError = errorMessage(error);
+      settings = defaultStoredSettings();
+    }
+  }
+
+  return json({
+    ...maskSettings(settings, source, {
+      settingsKeyConfigured: keyConfigured,
+      hasStoredSettings: storedPresent,
+      ...(envError ? { envError } : {}),
+    }),
+    ...(settingsError ? { settingsError } : {}),
+  });
+}
+
+async function handlePutSettings(request: Request, env: Env): Promise<Response> {
+  if (!settingsKeyConfigured(env)) {
+    return json(
+      {
+        error:
+          'SETTINGS_KEY is not configured or invalid. Add a 32-byte key in Cloudflare, then try again.',
+      },
+      503,
+    );
+  }
+
+  const contentLength = Number(request.headers.get('content-length') ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > 256 * 1024) {
+    return json({ error: 'settings body is too large' }, 413);
+  }
+  const body = await request.text();
+  if (body.length > 256 * 1024) {
+    return json({ error: 'settings body is too large' }, 413);
+  }
+
+  let submitted: unknown;
+  try {
+    submitted = JSON.parse(body);
+  } catch {
+    return json({ error: 'settings body is not valid JSON' }, 400);
+  }
+
+  let existing: StoredSettings;
+  try {
+    existing = (await loadStoredSettings(env)) ?? settingsFromEnv(env);
+  } catch {
+    try {
+      existing = settingsFromEnv(env);
+    } catch {
+      existing = defaultStoredSettings();
+    }
+  }
+
+  let merged: StoredSettings;
+  try {
+    merged = mergeSubmittedSettings(existing, submitted);
+  } catch (error) {
+    return json({ error: errorMessage(error) }, 400);
+  }
+
+  try {
+    buildConfigFromStoredSettings(merged, env.ADMIN_TOKEN?.trim() ?? '');
+  } catch (error) {
+    return json({ error: errorMessage(error) }, 400);
+  }
+
+  try {
+    await saveStoredSettings(env, merged);
+  } catch (error) {
+    return json({ error: errorMessage(error) }, 500);
+  }
+
+  return json({ ok: true });
+}
+
+async function handleDeleteSettings(env: Env): Promise<Response> {
+  try {
+    await deleteStoredSettings(env);
+    return json({ ok: true });
+  } catch (error) {
+    return json({ error: errorMessage(error) }, 500);
+  }
+}
+
 async function handleFetch(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const method = request.method.toUpperCase();
@@ -163,14 +292,12 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     }
     let configured = false;
     let mailboxCount = 0;
-    if (!describeConfigError(env)) {
-      try {
-        const config = parseConfig(env);
-        configured = config.mailboxes.length > 0 && (config.dryRun || Boolean(config.chatId));
-        mailboxCount = config.mailboxes.length;
-      } catch {
-        configured = false;
-      }
+    try {
+      const { config } = await loadConfig(env);
+      configured = config.mailboxes.length > 0 && (config.dryRun || Boolean(config.chatId));
+      mailboxCount = config.mailboxes.length;
+    } catch {
+      configured = false;
     }
     return json({
       ok: true,
@@ -213,6 +340,23 @@ async function handleFetch(request: Request, env: Env): Promise<Response> {
     return denied ?? handleTelegramTest(env);
   }
 
+  if (url.pathname === '/api/settings') {
+    const denied = requireAdmin(request, env);
+    if (denied) {
+      return denied;
+    }
+    if (method === 'GET') {
+      return handleGetSettings(env);
+    }
+    if (method === 'PUT') {
+      return handlePutSettings(request, env);
+    }
+    if (method === 'DELETE') {
+      return handleDeleteSettings(env);
+    }
+    return json({ error: 'method not allowed' }, 405);
+  }
+
   return json({ error: 'not found' }, 404);
 }
 
@@ -224,8 +368,11 @@ export default {
     }
 
     let config;
+    let source: 'env' | 'kv';
     try {
-      config = parseConfig(env);
+      const loaded = await loadConfig(env);
+      config = loaded.config;
+      source = loaded.source;
     } catch (error) {
       console.error(JSON.stringify({ event: 'config-error', error: errorMessage(error) }));
       return;
@@ -243,6 +390,7 @@ export default {
           event: 'poll-complete',
           cron: controller.cron,
           scheduledTime: controller.scheduledTime,
+          configSource: source,
           ...summary,
         }),
       );

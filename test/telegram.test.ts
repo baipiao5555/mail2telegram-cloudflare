@@ -42,7 +42,7 @@ describe('sendTelegramText', () => {
     expect(body.chat_id).toBe('42');
     expect(body.parse_mode).toBe('HTML');
     expect(body.text).toBe('<b>hello</b>');
-    expect(init.redirect).toBe('error');
+    expect(init.redirect).toBe('manual');
   });
 
   it('retries after a 429 response', async () => {
@@ -100,6 +100,22 @@ describe('sendTelegramText', () => {
     await expect(
       sendTelegramText({ token: '1:A', chatId: '42' }, '42', 'hello'),
     ).rejects.toThrow(/chat not found/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an unexpected Telegram API redirect', async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: 'https://example.com/' },
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      sendTelegramText({ token: '1:A', chatId: '42' }, '42', 'hello'),
+    ).rejects.toThrow(/unexpected redirect/);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -62,9 +62,19 @@ async function callSendMessage(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
-    redirect: 'error',
+    // Workers fetch rejects redirect: "error"; "manual" lets us reject redirects ourselves.
+    redirect: 'manual',
     signal: AbortSignal.timeout(options.timeoutMs ?? 15_000),
   });
+
+  const responseType = String((response as unknown as { type?: unknown }).type ?? '');
+  if (responseType === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+    return {
+      ok: false,
+      status: response.status,
+      description: `Telegram API returned an unexpected redirect (${response.status})`,
+    };
+  }
 
   const raw = await response.text();
   let payload: {

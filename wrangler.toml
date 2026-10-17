@@ -1,0 +1,40 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "mail2telegram"
+main = "src/index.ts"
+compatibility_date = "2026-10-17"
+workers_dev = true
+upload_source_maps = true
+
+# Scheduled IMAP polling. Cron triggers have a minimum granularity of one minute.
+# Change to "*/5 * * * *" if you have many mailboxes or a provider that throttles logins.
+[triggers]
+crons = ["* * * * *"]
+
+[observability]
+enabled = true
+
+# Create with: npx wrangler kv namespace create MAIL2TG_KV
+# The Deploy to Cloudflare button provisions this namespace and replaces the id automatically.
+# For manual deploys, replace the id with the value printed by the command.
+[[kv_namespaces]]
+binding = "MAIL2TG_KV"
+id = "00000000000000000000000000000000"
+
+[vars]
+# Non-secret defaults. Chat ids are not secret and can also be set here.
+TELEGRAM_CHAT_ID = ""
+TELEGRAM_JUNK_CHAT_ID = ""
+LANGUAGE = "Chinese"
+TIMEZONE = "Asia/Shanghai"
+MAX_EMAIL_CHARS = "3000"
+MAX_EMAIL_BYTES = "10485760"
+MAX_MESSAGES_PER_RUN = "20"
+INITIAL_SYNC = "skip"
+LOGIN_NOTIFY = "true"
+DEDUPE = "true"
+DRY_RUN = "false"
+
+# Secrets (do not put them in this file):
+#   npx wrangler secret put TELEGRAM_BOT_TOKEN
+#   npx wrangler secret put MAILBOXES
+#   npx wrangler secret put ADMIN_TOKEN

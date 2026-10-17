@@ -1,0 +1,18 @@
+Mail2Telegram for Cloudflare Workers
+
+This project is a derivative work of Mail2Telegram:
+  https://github.com/Heavrnl/mail2telegram
+  Copyright (C) the Mail2Telegram contributors
+  Licensed under the GNU General Public License v3.0
+
+The original project is a Python application that monitors IMAP mailboxes with
+IMAP IDLE and forwards new mail to Telegram. This port rewrites the core logic
+for Cloudflare Workers:
+
+  - Cron Trigger polling instead of a long-running IDLE process
+  - Cloudflare KV for UID cursors, deduplication, and status
+  - cloudflare:sockets for IMAP over TLS
+  - postal-mime for MIME parsing
+  - Telegram Bot API forwarding
+
+It is distributed under the same license, GPL-3.0. See LICENSE.

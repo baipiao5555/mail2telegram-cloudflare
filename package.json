@@ -1,0 +1,44 @@
+{
+  "name": "mail2telegram-cloudflare",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mail2Telegram ported to Cloudflare Workers: poll IMAP mailboxes on a schedule, keep state in KV, forward mail to Telegram.",
+  "type": "module",
+  "license": "GPL-3.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cf-typegen": "wrangler types"
+  },
+  "dependencies": {
+    "postal-mime": "^4.0.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261016.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.151.1"
+  },
+  "cloudflare": {
+    "bindings": {
+      "TELEGRAM_BOT_TOKEN": {
+        "description": "Telegram Bot Token from [@BotFather](https://t.me/BotFather)."
+      },
+      "TELEGRAM_CHAT_ID": {
+        "description": "Chat id that receives normal mail. Send the bot a message, then read `message.chat.id` from `https://api.telegram.org/bot<TOKEN>/getUpdates`."
+      },
+      "MAILBOXES": {
+        "description": "JSON array of mailboxes, for example `[{\"email\":\"you@gmail.com\",\"password\":\"app-password\",\"host\":\"imap.gmail.com\",\"port\":993}]`. Use an app password / authorization code, not your normal login password."
+      },
+      "ADMIN_TOKEN": {
+        "description": "Long random token that protects `/status`, `/run`, and `/telegram/test`. Generate one with `openssl rand -hex 32`."
+      }
+    }
+  }
+}
